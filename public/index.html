@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>リアルタイムビンゴ</title>
   <link rel="stylesheet" href="/css/style.css">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#0f1020">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="BINGO">
 </head>
 <body>
   <main class="wrap">
@@ -12,6 +20,12 @@
       <div class="logo">BINGO</div>
       <p class="muted">スマホ・タブレット・PC からそのまま参加できるリアルタイムビンゴ</p>
     </header>
+
+    <div id="install"></div>
+    <section class="panel hidden" id="my-joined" style="margin-bottom:16px">
+      <h2 style="font-size:1.1rem">参加中のゲーム</h2>
+      <div class="my-rooms" id="joined-list"></div>
+    </section>
 
     <div class="grid-2">
       <section class="panel" id="join-panel">
@@ -63,7 +77,9 @@
   </main>
 
   <script type="module">
-    import { api, storage, toast, el } from '/js/common.js';
+    import { api, storage, toast, el, renderInstallHint } from '/js/common.js';
+
+    renderInstallHint(document.getElementById('install'));
 
     const qsRoom = (new URLSearchParams(location.search).get('room') ?? '').toUpperCase();
     document.getElementById('name').value = storage.get('bingo.name') ?? '';
@@ -116,6 +132,26 @@
       } catch (err) {
         toast(err.message);
       }
+    });
+
+    // アプリとして起動した時にすぐ戻れるよう、この端末で参加中のゲームを表示
+    let joined = [];
+    try {
+      joined = Object.keys(localStorage)
+        .filter((k) => k.startsWith('bingo.player.') && storage.get(k)?.token)
+        .map((k) => k.slice('bingo.player.'.length))
+        .slice(0, 10);
+    } catch {
+      /* ストレージ不可 */
+    }
+    Promise.all(joined.map((r) => api(`/api/rooms/${r}`).then((info) => ({ r, info })).catch(() => null))).then((list) => {
+      const alive = list.filter(Boolean);
+      if (!alive.length) return;
+      document.getElementById('joined-list').replaceChildren(...alive.map(({ r, info }) =>
+        el('a', { href: `/play?room=${r}` },
+          el('span', {}, info.settings.title),
+          el('span', { class: 'muted small' }, `${r} ▶`))));
+      document.getElementById('my-joined').classList.remove('hidden');
     });
 
     const rooms = storage.get('bingo.hostRooms') ?? [];

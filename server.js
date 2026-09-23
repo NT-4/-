@@ -17,6 +17,7 @@ const MIME = {
   '.svg': 'image/svg+xml',
   '.json': 'application/json',
   '.ico': 'image/x-icon',
+  '.png': 'image/png',
 };
 const PAGES = {
   '/': 'index.html',
@@ -34,6 +35,30 @@ export function qrSvg(text) {
   return qr.createSvgTag({ cellSize: 8, margin: 4, scalable: true, alt: text });
 }
 
+/** PWA マニフェスト。room 付きで開くと、ホーム画面のアイコンからそのルームに直行する */
+export function manifestFor(room) {
+  const code = /^[A-Za-z0-9]{1,12}$/.test(room ?? '') ? room.toUpperCase() : '';
+  return {
+    id: '/',
+    name: 'リアルタイムビンゴ',
+    short_name: 'BINGO',
+    description: 'スマホで遊べるリアルタイム・ビンゴ',
+    lang: 'ja',
+    start_url: code ? `/?room=${code}` : '/',
+    scope: '/',
+    display: 'standalone',
+    orientation: 'portrait',
+    background_color: '#0f1020',
+    theme_color: '#0f1020',
+    icons: [
+      { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+      { src: '/icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      { src: '/icons/icon.svg', sizes: 'any', type: 'image/svg+xml' },
+    ],
+  };
+}
+
 /** 会場 Wi-Fi から届く LAN 側の URL 候補 */
 function lanUrls(port) {
   const urls = [];
@@ -48,7 +73,10 @@ function lanUrls(port) {
 export function createApp({
   dataFile = null,
   tickMs = 1000,
-  publicUrl = process.env.PUBLIC_URL ?? '',
+  // Render は公開URLを RENDER_EXTERNAL_URL で自動設定する
+  publicUrl = process.env.PUBLIC_URL ?? process.env.RENDER_EXTERNAL_URL ?? '',
+  // PaaS のプロキシ配下では X-Forwarded-For の先頭が実クライアント
+  trustProxy = process.env.TRUST_PROXY === '1' || Boolean(process.env.RENDER),
   staffThrottleMs = 500,
   joinRatePerMin = Number(process.env.JOIN_RATE_PER_MIN ?? 6000),
 } = {}) {
@@ -199,8 +227,10 @@ export function createApp({
 
   async function api(req, res, url) {
     const parts = url.pathname.split('/').filter(Boolean); // ['api','rooms',id,...]
-    const ip = req.socket.remoteAddress ?? '';
+    const forwarded = trustProxy ? String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() : '';
+    const ip = forwarded || req.socket.remoteAddress || '';
 
+    if (req.method === 'GET' && url.pathname === '/api/health') return json(res, 200, { ok: true });
     if (req.method === 'GET' && url.pathname === '/api/config') {
       return json(res, 200, { publicUrl: publicUrl.replace(/\/+$/, ''), lanUrls: lanUrls(server.address()?.port) });
     }
@@ -295,6 +325,9 @@ export function createApp({
         // QR 用の短い参加URL
         res.writeHead(302, { Location: `/?room=${short[1].toUpperCase()}` });
         res.end();
+      } else if (url.pathname === '/manifest.webmanifest') {
+        res.writeHead(200, { 'Content-Type': 'application/manifest+json; charset=utf-8', 'Cache-Control': 'no-cache' });
+        res.end(JSON.stringify(manifestFor(url.searchParams.get('room'))));
       } else if (url.pathname.startsWith('/api/')) await api(req, res, url);
       else if (req.method === 'GET') await serveStatic(res, url.pathname);
       else throw new GameError('Method Not Allowed', 405);

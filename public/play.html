@@ -5,9 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>ビンゴに参加中</title>
   <link rel="stylesheet" href="/css/style.css">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#0f1020">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="BINGO">
 </head>
 <body>
   <main class="wrap">
+    <div id="install"></div>
     <header class="row" style="margin-bottom:12px">
       <div>
         <h1 id="title" style="font-size:1.3rem;margin:0">BINGO</h1>
@@ -53,8 +62,11 @@
   <script type="module">
     import {
       $, api, connect, el, roomId, storage, toast, celebrate, rollTo, setBall,
-      renderHistory, renderWinners, statusBadge, clock, COLUMNS, vibrate,
+      renderHistory, renderWinners, statusBadge, clock, COLUMNS, vibrate, keepAwake, renderInstallHint,
     } from '/js/common.js';
+
+    keepAwake();
+    renderInstallHint($('#install'));
 
     const saved = storage.get(`bingo.player.${roomId}`);
     if (!saved?.token) location.replace(`/?room=${roomId}`);

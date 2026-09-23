@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>ホスト管理画面</title>
   <link rel="stylesheet" href="/css/style.css">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#0f1020">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="BINGO">
 </head>
 <body>
   <main class="wrap">
@@ -129,11 +137,17 @@
     </section>
   </main>
 
+  <button class="fab" id="draw-fab" aria-label="抽選する">🎲 抽選する</button>
+
   <script type="module">
     import {
       $, api, connect, el, roomId, storage, toast, rollTo, setBall, renderBoard,
       renderWinners, statusBadge, clock, shareBase, joinUrlOf, qrSrc, copyText, shareLink, lineShareUrl,
+      keepAwake,
     } from '/js/common.js';
+
+    document.body.classList.add('has-fab');
+    keepAwake();
 
     const token = storage.get(`bingo.host.${roomId}`);
     if (!token) {
@@ -216,6 +230,9 @@
       $('#resume').classList.toggle('hidden', s !== 'paused');
       $('#finish').classList.toggle('hidden', s === 'waiting' || s === 'finished');
       $('#draw').disabled = s !== 'running' || rolling || room.draws.length >= 75;
+      $('#draw-fab').disabled = $('#draw').disabled;
+      $('#draw-fab').textContent = s === 'waiting' ? '▶ ゲームを開始' : `🎲 抽選する（${room.draws.length + 1}球目）`;
+      if (s === 'waiting') $('#draw-fab').disabled = false;
 
       $('#s-players').textContent = room.playerCount;
       $('#s-reach').textContent = h.reachPlayers;
@@ -252,6 +269,7 @@
         rolling = true;
         state = msg;
         $('#draw').disabled = true;
+        $('#draw-fab').disabled = true;
         rollTo($('#current'), ev.number, () => {
           rolling = false;
           shown = ev.number;
@@ -266,6 +284,10 @@
     }
 
     $('#draw').addEventListener('click', () => act('draw').catch(() => {}));
+    $('#draw-fab').addEventListener('click', () => {
+      if (state?.room.status === 'waiting') return $('#start').click();
+      $('#draw').click();
+    });
     $('#start').addEventListener('click', () => act('start').catch(() => {}));
     $('#pause').addEventListener('click', () => act('pause').catch(() => {}));
     $('#resume').addEventListener('click', () => act('resume').catch(() => {}));

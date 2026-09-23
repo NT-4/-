@@ -313,3 +313,52 @@ button.pink { background: var(--accent-2); color: #fff; }
 .join-hero .event { font-size: clamp(1.4rem, 5vw, 2rem); font-weight: 900; }
 .screen-join .count { font-size: clamp(1rem, 1.5vw, 1.5rem); }
 .screen.waiting .screen-join .count { font-size: clamp(1.4rem, 2.5vw, 2.2rem); }
+
+/* ---------- スマホ（アプリ起動・ノッチ対応・タップ操作） ---------- */
+body {
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  overscroll-behavior-y: none;
+}
+button, .btn, .cell, a { touch-action: manipulation; }
+.cell { -webkit-user-select: none; -webkit-touch-callout: none; }
+.install {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  background: var(--panel-2);
+  border: 1px dashed #ffffff33;
+  border-radius: 12px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+}
+details.install { display: block; }
+.install summary { cursor: pointer; font-weight: 700; }
+.install ol { margin: 8px 0 0; padding-left: 1.4em; }
+.fab { display: none !important; }
+.my-rooms { display: grid; gap: 8px; }
+.my-rooms a { display: flex; justify-content: space-between; align-items: center; text-decoration: none; background: var(--panel-2); color: var(--text); padding: 12px 14px; border-radius: 12px; font-weight: 700; }
+
+@media (max-width: 600px) {
+  .wrap { padding: 12px; }
+  /* iOS で入力時に勝手にズームしないよう 16px 以上 */
+  input, select, textarea { font-size: 16px; }
+  /* スマホで主催する時は抽選ボタンを親指の位置に固定 */
+  .fab {
+    display: flex !important;
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    z-index: 30;
+    font-size: 1.2rem;
+    padding: 16px;
+    box-shadow: 0 8px 24px #000c;
+  }
+  body.has-fab { padding-bottom: calc(90px + env(safe-area-inset-bottom)); }
+  .board { gap: 2px; }
+  .board .h { padding: 0 3px; font-size: .7rem; }
+  .board .n { border-radius: 4px; font-size: .62rem; }
+  .code-big { letter-spacing: .08em; }
+}

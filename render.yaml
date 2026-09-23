@@ -1,0 +1,13 @@
+# Render Blueprint: GitHub 連携後「New > Blueprint」でこのリポジトリを選ぶだけで公開できます
+services:
+  - type: web
+    name: realtime-bingo
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm install --omit=dev
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"

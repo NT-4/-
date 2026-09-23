@@ -227,3 +227,21 @@ test('大人数向け: 他人の参加・マス開けは参加者に配信され
   assert.equal(text.split('data: ').length, before + 1, '抽選は即時配信される');
   ctrl.abort();
 });
+
+test('PWA: マニフェスト（ルーム直行）・Service Worker・アイコン・ヘルスチェック', async () => {
+  const m = await fetch(`${base}/manifest.webmanifest?room=abcde`);
+  assert.match(m.headers.get('content-type'), /application\/manifest\+json/);
+  const manifest = await m.json();
+  assert.equal(manifest.display, 'standalone');
+  assert.equal(manifest.start_url, '/?room=ABCDE');
+  assert.ok(manifest.icons.some((i) => i.sizes === '512x512'));
+  const bad = await (await fetch(`${base}/manifest.webmanifest?room=${encodeURIComponent('<x>')}`)).json();
+  assert.equal(bad.start_url, '/');
+
+  const sw = await fetch(`${base}/sw.js`);
+  assert.equal(sw.status, 200);
+  assert.match(sw.headers.get('content-type'), /javascript/);
+  const icon = await fetch(`${base}/icons/icon-192.png`);
+  assert.equal(icon.headers.get('content-type'), 'image/png');
+  assert.equal((await call('/api/health')).body.ok, true);
+});

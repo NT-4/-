@@ -275,3 +275,83 @@ export async function resolveShareBase() {
 export function vibrate(pattern) {
   if (navigator.userActivation?.hasBeenActive) navigator.vibrate?.(pattern);
 }
+
+// ---------- スマホアプリ化（PWA） ----------
+export const isStandalone = () =>
+  matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+export const isIOS = () =>
+  /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.userAgent.includes('Macintosh') && navigator.maxTouchPoints > 1);
+
+if ('serviceWorker' in navigator && isSecureContext) {
+  addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}
+
+// ルームを開いている間にホーム画面へ追加すると、アイコンからそのルームに直行できる
+if (roomId) {
+  const link = document.querySelector('link[rel="manifest"]');
+  if (link) link.href = `/manifest.webmanifest?room=${encodeURIComponent(roomId)}`;
+}
+
+/** ゲーム中に画面が消灯しないようにする（対応ブラウザのみ） */
+export function keepAwake() {
+  if (!('wakeLock' in navigator)) return;
+  let lock = null;
+  const request = async () => {
+    if (document.visibilityState !== 'visible' || (lock && !lock.released)) return;
+    try {
+      lock = await navigator.wakeLock.request('screen');
+    } catch {
+      /* 省電力モード等で拒否された場合は何もしない */
+    }
+  };
+  document.addEventListener('visibilitychange', request);
+  document.addEventListener('pointerdown', request, { once: true });
+  request();
+}
+
+let deferredInstall = null;
+addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstall = e;
+  dispatchEvent(new Event('bingo:installable'));
+});
+
+/**
+ * 「ホーム画面に追加」の案内を target に描画する。
+ * Android/Chrome はボタン1つでインストール、iPhone は手順を表示。
+ */
+export function renderInstallHint(target) {
+  const draw = () => {
+    if (isStandalone()) return target.replaceChildren();
+    if (deferredInstall) {
+      target.replaceChildren(
+        el('div', { class: 'install' },
+          el('span', {}, '📲 ホーム画面に追加すると、アプリのように全画面で遊べます'),
+          el('button', {
+            class: 'small',
+            onclick: async () => {
+              deferredInstall.prompt();
+              await deferredInstall.userChoice.catch(() => {});
+              deferredInstall = null;
+              draw();
+            },
+          }, '追加する')),
+      );
+    } else if (isIOS()) {
+      target.replaceChildren(
+        el('details', { class: 'install' },
+          el('summary', {}, '📲 ホーム画面に追加してアプリのように使う'),
+          el('ol', { class: 'small' },
+            el('li', {}, 'Safari 下部の 共有ボタン（□↑）をタップ'),
+            el('li', {}, '「ホーム画面に追加」→「追加」'),
+            el('li', {}, 'ホーム画面の BINGO アイコンから起動')),
+          el('p', { class: 'small muted' }, '※ iPhone ではアプリと Safari の保存データが別になります。参加する前に追加して、アプリ側から参加するのがおすすめです。')),
+      );
+    } else {
+      target.replaceChildren();
+    }
+  };
+  addEventListener('bingo:installable', draw);
+  addEventListener('appinstalled', () => target.replaceChildren());
+  draw();
+}
