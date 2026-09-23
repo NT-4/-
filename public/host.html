@@ -20,17 +20,27 @@
     </header>
 
     <div class="grid-2">
-      <section class="panel">
-        <div class="small muted">ルームコード</div>
-        <div class="code-big" id="code"></div>
-        <div class="small muted" style="margin-top:6px">参加URL</div>
-        <div class="row">
-          <code class="copy small" id="join-url" style="flex:1"></code>
-          <button class="secondary small" id="copy">コピー</button>
+      <section class="panel share">
+        <div class="share-grid">
+          <a id="qr-link" target="_blank" rel="noopener" title="QRを拡大">
+            <img id="qr" class="qr" alt="参加用QRコード" width="180" height="180">
+          </a>
+          <div style="min-width:0">
+            <div class="small muted">ルームコード</div>
+            <div class="code-big" id="code"></div>
+            <div class="small muted" style="margin-top:6px">参加URL（QRと同じ）</div>
+            <code class="copy" id="join-url"></code>
+            <select id="base-select" class="hidden small" style="margin-top:6px" aria-label="共有に使うアドレス"></select>
+          </div>
         </div>
-        <p class="small" style="margin-bottom:0">
-          <a id="screen-link" target="_blank" rel="noopener">📽 プロジェクター投影画面を開く</a>
-        </p>
+        <p id="share-note" class="small hidden" style="color:var(--accent)"></p>
+        <div class="row" style="margin-top:10px">
+          <button class="secondary" id="copy">📋 コピー</button>
+          <button class="secondary" id="share">📤 共有</button>
+          <a class="btn secondary-btn" id="line" target="_blank" rel="noopener">LINEで送る</a>
+          <a class="btn secondary-btn" id="poster-link" target="_blank" rel="noopener">🖨 ポスター印刷</a>
+          <a class="btn secondary-btn" id="screen-link" target="_blank" rel="noopener">📽 投影画面</a>
+        </div>
       </section>
 
       <section class="panel">
@@ -122,7 +132,7 @@
   <script type="module">
     import {
       $, api, connect, el, roomId, storage, toast, rollTo, setBall, renderBoard,
-      renderWinners, statusBadge, clock,
+      renderWinners, statusBadge, clock, shareBase, joinUrlOf, qrSrc, copyText, shareLink, lineShareUrl,
     } from '/js/common.js';
 
     const token = storage.get(`bingo.host.${roomId}`);
@@ -147,18 +157,32 @@
       }
     };
 
-    const joinUrl = `${location.origin}/?room=${roomId}`;
+    // ---------- 共有パネル ----------
+    let joinUrl = '';
+    const title = () => state?.room.settings.title ?? 'BINGO';
+    function applyShare(base) {
+      joinUrl = joinUrlOf(base, roomId);
+      $('#join-url').textContent = joinUrl;
+      $('#qr').src = qrSrc(joinUrl);
+      $('#qr-link').href = qrSrc(joinUrl);
+      $('#line').href = lineShareUrl(title(), joinUrl);
+      const b = encodeURIComponent(base);
+      $('#poster-link').href = `/poster?room=${roomId}&base=${b}`;
+      $('#screen-link').href = `/screen?room=${roomId}&base=${b}`;
+    }
     $('#code').textContent = roomId;
-    $('#join-url').textContent = joinUrl;
-    $('#screen-link').href = `/screen?room=${roomId}`;
-    $('#copy').addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(joinUrl);
-        toast('参加URLをコピーしました');
-      } catch {
-        toast('コピーできませんでした。手動で選択してください');
+    shareBase().then(({ base, options, note }) => {
+      applyShare(base);
+      if (note) Object.assign($('#share-note'), { textContent: `⚠ ${note}`, className: 'small' });
+      if (options.length > 1) {
+        const sel = $('#base-select');
+        sel.replaceChildren(...options.map((o) => el('option', { value: o }, o)));
+        sel.classList.remove('hidden');
+        sel.addEventListener('change', () => applyShare(sel.value));
       }
     });
+    $('#copy').addEventListener('click', () => copyText(joinUrl));
+    $('#share').addEventListener('click', () => shareLink(title(), joinUrl));
 
     const host = {
       move: (winnerId, dir) => act('move', { winnerId, dir }).catch(() => {}),
@@ -181,6 +205,7 @@
       const { room, host: h } = state;
       document.title = `${room.settings.title} | ホスト`;
       $('#title').textContent = room.settings.title;
+      if (joinUrl) $('#line').href = lineShareUrl(room.settings.title, joinUrl);
       statusBadge($('#status'), room.status);
       if (!rolling && shown !== room.draws.at(-1)) setBall($('#current'), (shown = room.draws.at(-1)));
       renderBoard($('#board'), room.draws);

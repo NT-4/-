@@ -53,7 +53,7 @@
   <script type="module">
     import {
       $, api, connect, el, roomId, storage, toast, celebrate, rollTo, setBall,
-      renderHistory, renderWinners, statusBadge, clock, COLUMNS,
+      renderHistory, renderWinners, statusBadge, clock, COLUMNS, vibrate,
     } from '/js/common.js';
 
     const saved = storage.get(`bingo.player.${roomId}`);
@@ -167,7 +167,7 @@
 
       const reachTotal = me.cards.filter((c) => !c.won).reduce((s, c) => s + c.reachCells.length, 0);
       $('#reach').classList.toggle('hidden', reachTotal === 0 || me.cards.every((c) => c.won));
-      if (reachTotal > prevReach && prevReach === 0) navigator.vibrate?.(80);
+      if (reachTotal > prevReach && prevReach === 0) vibrate(80);
       prevReach = reachTotal;
     }
 

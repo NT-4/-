@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>参加用ポスター</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    body { background: #fff; color: #111; }
+    .poster { max-width: 720px; margin: 0 auto; padding: 32px 24px; text-align: center; }
+    .poster .logo { font-size: clamp(3rem, 12vw, 5.5rem); background: linear-gradient(90deg, #1c7ed6, #e03131, #f08c00, #2f9e44, #7048e8); -webkit-background-clip: text; background-clip: text; }
+    .poster h1 { font-size: clamp(1.5rem, 5vw, 2.4rem); margin: 8px 0 20px; }
+    .poster .qr { width: min(80vw, 420px); height: auto; aspect-ratio: 1; margin: 0 auto; padding: 0; border-radius: 0; }
+    .poster .url { font-size: 1.2rem; font-weight: 700; word-break: break-all; margin-top: 12px; }
+    .poster .code { font-size: 2.6rem; font-weight: 900; letter-spacing: .2em; }
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 24px; text-align: left; }
+    .steps div { border: 2px solid #eee; border-radius: 12px; padding: 12px; font-size: .95rem; }
+    .steps b { display: block; font-size: 1.4rem; color: #ff5c8a; }
+    .toolbar { position: sticky; top: 0; background: #fffe; padding: 10px; text-align: center; border-bottom: 1px solid #eee; }
+    @media (max-width: 520px) { .steps { grid-template-columns: 1fr; } }
+    @media print {
+      .toolbar { display: none; }
+      .poster { padding-top: 0; }
+      @page { size: A4; margin: 12mm; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar"><button onclick="print()">🖨 印刷する（A4）</button></div>
+  <main class="poster">
+    <div class="logo">BINGO</div>
+    <h1 id="title">ビンゴ大会</h1>
+    <img id="qr" class="qr" alt="参加用QRコード">
+    <div class="url" id="url"></div>
+    <div>ルームコード <span class="code" id="code"></span></div>
+    <div class="steps">
+      <div><b>1</b>スマホのカメラで QR を読み取る</div>
+      <div><b>2</b>ニックネームを入力して「参加する」</div>
+      <div><b>3</b>自分のカードが届いたら準備OK！</div>
+    </div>
+  </main>
+  <script type="module">
+    import { $, api, roomId, resolveShareBase, joinUrlOf, qrSrc } from '/js/common.js';
+    $('#code').textContent = roomId;
+    api(`/api/rooms/${roomId}`).then((r) => {
+      $('#title').textContent = r.settings.title;
+      document.title = `${r.settings.title} | 参加用ポスター`;
+    }).catch(() => ($('#title').textContent = 'ルームが見つかりません'));
+    resolveShareBase().then(({ base }) => {
+      const url = joinUrlOf(base, roomId);
+      $('#url').textContent = url;
+      $('#qr').src = qrSrc(url);
+    });
+  </script>
+</body>
+</html>

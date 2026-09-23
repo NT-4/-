@@ -13,10 +13,15 @@
         <div class="logo" id="title" style="font-size:clamp(1.6rem,3.5vw,3rem)">BINGO</div>
         <div class="row small muted"><span id="status" class="badge">…</span><span id="pattern"></span><span id="clock"></span></div>
       </div>
-      <div class="panel current"><div id="current"></div><div class="count" id="count">0 / 75</div></div>
-      <div class="panel">
-        <div class="small muted">参加はこちら → <b id="join-url" style="color:var(--text)"></b></div>
-        <div class="code-big" id="code"></div>
+      <div class="panel current current-panel"><div id="current"></div><div class="count" id="count">0 / 75</div></div>
+      <div class="panel screen-join">
+        <img id="qr" class="qr" alt="参加用QRコード">
+        <div style="min-width:0">
+          <div class="count">📱 スマホで読み取って参加</div>
+          <div class="small muted">またはURLを入力 → <b id="join-url" style="color:var(--text);word-break:break-all"></b></div>
+          <div class="code-big" id="code"></div>
+          <div class="small muted" id="players"></div>
+        </div>
       </div>
     </section>
     <section style="display:grid;gap:16px;align-content:start">
@@ -29,7 +34,10 @@
   </main>
 
   <script type="module">
-    import { $, connect, roomId, rollTo, setBall, renderBoard, renderWinners, statusBadge, clock, celebrate } from '/js/common.js';
+    import {
+      $, connect, roomId, rollTo, setBall, renderBoard, renderWinners, statusBadge, clock, celebrate,
+      resolveShareBase, joinUrlOf, qrSrc,
+    } from '/js/common.js';
 
     let state = null;
     let rolling = false;
@@ -37,7 +45,11 @@
     let shown = null;
 
     $('#code').textContent = roomId;
-    $('#join-url').textContent = `${location.host}/?room=${roomId}`;
+    resolveShareBase().then(({ base }) => {
+      const url = joinUrlOf(base, roomId);
+      $('#join-url').textContent = url.replace(/^https?:\/\//, '');
+      $('#qr').src = qrSrc(url);
+    });
 
     function render() {
       const { room } = state;
@@ -45,6 +57,9 @@
       $('#title').textContent = room.settings.title;
       $('#pattern').textContent = `成立条件: ${room.settings.patternLabel}`;
       statusBadge($('#status'), room.status);
+      // 開始前は QR を大きく表示して入場中の参加を促す
+      document.querySelector('.screen').classList.toggle('waiting', room.status === 'waiting');
+      $('#players').textContent = `参加者 ${room.playerCount} 人`;
       $('#count').textContent = `${room.draws.length} / 75 球`;
       if (!rolling && shown !== room.draws.at(-1)) setBall($('#current'), (shown = room.draws.at(-1)));
       renderBoard($('#board'), room.draws);

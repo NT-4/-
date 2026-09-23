@@ -3,7 +3,10 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { networkInterfaces } from 'node:os';
+import { randomInt } from 'node:crypto';
 import { RoomStore, GameError, safeEqual } from './src/rooms.js';
+import qrcode from './src/vendor/qrcode.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(ROOT, 'public');
@@ -15,9 +18,40 @@ const MIME = {
   '.json': 'application/json',
   '.ico': 'image/x-icon',
 };
-const PAGES = { '/': 'index.html', '/host': 'host.html', '/play': 'play.html', '/screen': 'screen.html' };
+const PAGES = {
+  '/': 'index.html',
+  '/host': 'host.html',
+  '/play': 'play.html',
+  '/screen': 'screen.html',
+  '/poster': 'poster.html',
+};
 
-export function createApp({ dataFile = null, tickMs = 1000 } = {}) {
+/** 参加URL用の QR コード（SVG） */
+export function qrSvg(text) {
+  const qr = qrcode(0, 'M');
+  qr.addData(text);
+  qr.make();
+  return qr.createSvgTag({ cellSize: 8, margin: 4, scalable: true, alt: text });
+}
+
+/** 会場 Wi-Fi から届く LAN 側の URL 候補 */
+function lanUrls(port) {
+  const urls = [];
+  for (const list of Object.values(networkInterfaces())) {
+    for (const a of list ?? []) {
+      if (a.family === 'IPv4' && !a.internal) urls.push(`http://${a.address}:${port}`);
+    }
+  }
+  return urls;
+}
+
+export function createApp({
+  dataFile = null,
+  tickMs = 1000,
+  publicUrl = process.env.PUBLIC_URL ?? '',
+  staffThrottleMs = 500,
+  joinRatePerMin = Number(process.env.JOIN_RATE_PER_MIN ?? 6000),
+} = {}) {
   const store = new RoomStore({ file: dataFile });
   /** roomId -> Set<{res, role, playerId}> */
   const clients = new Map();
@@ -32,34 +66,57 @@ export function createApp({ dataFile = null, tickMs = 1000 } = {}) {
   }
 
   function send(res, payload) {
-    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    res.write(`data: ${typeof payload === 'string' ? payload : JSON.stringify(payload)}\n\n`);
   }
 
-  function payloadFor(room, client, pub, host, event) {
-    const payload = { room: pub, event };
-    if (client.role === 'host') payload.host = host();
+  // 共通部分(room)は1回だけ文字列化し、個人部分だけを連結する（数千接続への配信コストを削減）
+  function payloadFor(room, client, pubJson, host, event) {
+    let extra = '';
+    if (client.role === 'host') extra = `,"host":${JSON.stringify(host())}`;
     if (client.role === 'player') {
       const player = room.players[client.playerId];
-      if (!player) return { ...payload, kicked: true };
-      payload.me = room.playerView(player);
+      extra = player ? `,"me":${JSON.stringify(room.playerView(player))}` : ',"kicked":true';
     }
-    return payload;
+    return `{"room":${pubJson},"event":${JSON.stringify(event ?? null)}${extra}}`;
   }
 
-  function broadcast(room, event = null, onlyPlayerId = null) {
+  const isStaff = (c) => c.role !== 'player';
+  const staffTimers = new Map();
+
+  function sendTo(room, filter, event) {
     const set = clients.get(room.id);
     if (!set) return;
-    const pub = room.publicState();
-    let hostCache;
-    const host = () => (hostCache ??= room.hostView());
-    for (const client of set) {
-      // マス開け等の個人操作は本人とホストにだけ送る（数千人規模でも O(N) に抑える）
-      if (onlyPlayerId && client.role !== 'host' && client.playerId !== onlyPlayerId) continue;
-      send(client.res, payloadFor(room, client, pub, host, event));
-    }
+    const pubJson = JSON.stringify(room.publicState());
+    const host = () => room.hostView(staffThrottleMs);
+    for (const client of set) if (filter(client)) send(client.res, payloadFor(room, client, pubJson, host, event));
   }
 
-  store.on('change', (room, event) => broadcast(room, event, event?.playerId ?? null));
+  /** ホスト・投影画面への更新はまとめて最大 staffThrottleMs に1回 */
+  function scheduleStaff(room) {
+    if (staffTimers.has(room.id)) return;
+    const t = setTimeout(() => {
+      staffTimers.delete(room.id);
+      sendTo(room, isStaff, { kind: 'update' });
+    }, staffThrottleMs);
+    t.unref();
+    staffTimers.set(room.id, t);
+  }
+
+  function broadcast(room, event = null) {
+    const personal = event?.playerId;
+    // 参加・マス開け等は全員に送らない（数千人が同時に参加しても O(N^2) にならない）
+    if (personal || event?.kind === 'join') {
+      if (personal) sendTo(room, (c) => c.playerId === personal, event);
+      scheduleStaff(room);
+      return;
+    }
+    clearTimeout(staffTimers.get(room.id));
+    staffTimers.delete(room.id);
+    room.hostViewCache = null;
+    sendTo(room, () => true, event);
+  }
+
+  store.on('change', (room, event) => broadcast(room, event));
   store.on('removed', (room) => {
     for (const c of clients.get(room.id) ?? []) c.res.end();
     clients.delete(room.id);
@@ -68,6 +125,8 @@ export function createApp({ dataFile = null, tickMs = 1000 } = {}) {
   const tick = setInterval(() => store.tick(), tickMs);
   const heartbeat = setInterval(() => {
     for (const set of clients.values()) for (const c of set) c.res.write(': ping\n\n');
+    const now = Date.now();
+    for (const [key, hits] of limits) if (now - hits.at(-1) > 60_000) limits.delete(key);
   }, 20_000);
   tick.unref();
   heartbeat.unref();
@@ -118,10 +177,11 @@ export function createApp({ dataFile = null, tickMs = 1000 } = {}) {
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
     });
-    res.write('retry: 2000\n\n');
+    // 再接続が一斉に押し寄せないよう待ち時間をばらす
+    res.write(`retry: ${1500 + randomInt(3500)}\n\n`);
     if (!clients.has(room.id)) clients.set(room.id, new Set());
     clients.get(room.id).add(client);
-    send(res, payloadFor(room, client, room.publicState(), () => room.hostView(), { kind: 'sync' }));
+    send(res, payloadFor(room, client, JSON.stringify(room.publicState()), () => room.hostView(staffThrottleMs), { kind: 'sync' }));
     req.on('close', () => clients.get(room.id)?.delete(client));
   }
 
@@ -141,6 +201,16 @@ export function createApp({ dataFile = null, tickMs = 1000 } = {}) {
     const parts = url.pathname.split('/').filter(Boolean); // ['api','rooms',id,...]
     const ip = req.socket.remoteAddress ?? '';
 
+    if (req.method === 'GET' && url.pathname === '/api/config') {
+      return json(res, 200, { publicUrl: publicUrl.replace(/\/+$/, ''), lanUrls: lanUrls(server.address()?.port) });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/qr.svg') {
+      const text = url.searchParams.get('text') ?? '';
+      if (!text || text.length > 512) throw new GameError('text が不正です');
+      res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=86400' });
+      return res.end(qrSvg(text));
+    }
+
     if (req.method === 'POST' && parts.length === 2 && parts[1] === 'rooms') {
       rateLimit(`create:${ip}`, 10, 60_000);
       const body = await readJson(req);
@@ -159,7 +229,8 @@ export function createApp({ dataFile = null, tickMs = 1000 } = {}) {
     const body = await readJson(req);
 
     if (action === 'join') {
-      rateLimit(`join:${ip}`, 60, 60_000);
+      // 会場 Wi-Fi は全員が同じグローバルIPになりやすいので上限は緩め
+      rateLimit(`join:${ip}`, joinRatePerMin, 60_000);
       const player = room.addPlayer(body.name);
       store.changed(room, { kind: 'join' });
       return json(res, 201, { playerId: player.id, token: player.token });
@@ -219,7 +290,12 @@ export function createApp({ dataFile = null, tickMs = 1000 } = {}) {
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     try {
-      if (url.pathname.startsWith('/api/')) await api(req, res, url);
+      const short = url.pathname.match(/^\/r\/([A-Za-z0-9]{1,12})\/?$/);
+      if (short) {
+        // QR 用の短い参加URL
+        res.writeHead(302, { Location: `/?room=${short[1].toUpperCase()}` });
+        res.end();
+      } else if (url.pathname.startsWith('/api/')) await api(req, res, url);
       else if (req.method === 'GET') await serveStatic(res, url.pathname);
       else throw new GameError('Method Not Allowed', 405);
     } catch (e) {
@@ -231,6 +307,7 @@ export function createApp({ dataFile = null, tickMs = 1000 } = {}) {
   });
 
   server.on('close', () => {
+    for (const t of staffTimers.values()) clearTimeout(t);
     clearInterval(tick);
     clearInterval(heartbeat);
     store.saveNow();

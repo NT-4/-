@@ -173,3 +173,57 @@ test('ホスト以外にカード情報や他人のトークンは漏れない',
   assert.ok(!text.includes(room.hostToken));
   assert.ok(!('players' in pub));
 });
+
+test('短縮URL /r/CODE は参加画面へリダイレクト', async () => {
+  const { room } = await setup();
+  const res = await fetch(`${base}/r/${room.id.toLowerCase()}`, { redirect: 'manual' });
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get('location'), `/?room=${room.id}`);
+});
+
+test('QR コードを SVG で返し、長すぎる入力は拒否', async () => {
+  const ok = await fetch(`${base}/api/qr.svg?text=${encodeURIComponent('https://example.com/r/ABCDE')}`);
+  assert.equal(ok.status, 200);
+  assert.match(ok.headers.get('content-type'), /image\/svg\+xml/);
+  assert.match(await ok.text(), /^<svg[\s\S]*<\/svg>$/);
+  const bad = await fetch(`${base}/api/qr.svg?text=${'a'.repeat(600)}`);
+  assert.equal(bad.status, 400);
+});
+
+test('config は共有用URLの候補を返す', async () => {
+  const { body } = await call('/api/config');
+  assert.equal(typeof body.publicUrl, 'string');
+  assert.ok(Array.isArray(body.lanUrls));
+});
+
+test('大人数向け: 他人の参加・マス開けは参加者に配信されない', async () => {
+  const { room, hostToken, join } = await setup();
+  const a = await join('A');
+  await call(`/api/rooms/${room.id}/host/start`, {}, hostToken);
+  const ctrl = new AbortController();
+  const res = await fetch(`${base}/api/rooms/${room.id}/events?token=${a.token}`, { signal: ctrl.signal });
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let text = '';
+  let pending = null; // タイムアウトで取りこぼさないよう read() は使い回す
+  const collect = async (ms) => {
+    const until = Date.now() + ms;
+    while (Date.now() < until) {
+      pending ??= reader.read();
+      const r = await Promise.race([pending, new Promise((ok) => setTimeout(() => ok(null), until - Date.now()))]);
+      if (!r) break;
+      pending = null;
+      if (r.done) break;
+      text += dec.decode(r.value, { stream: true });
+    }
+  };
+  await collect(100);
+  const before = text.split('data: ').length;
+  for (let i = 0; i < 20; i++) await join(`guest${i}`);
+  await collect(700);
+  assert.equal(text.split('data: ').length, before, '他人の参加で配信が発生しない');
+  await call(`/api/rooms/${room.id}/host/draw`, {}, hostToken);
+  await collect(200);
+  assert.equal(text.split('data: ').length, before + 1, '抽選は即時配信される');
+  ctrl.abort();
+});

@@ -240,7 +240,6 @@ button.pink { background: var(--accent-2); color: #fff; }
 .stat b { display: block; font-size: 1.6rem; }
 
 .code-big { font-size: clamp(1.8rem, 6vw, 2.6rem); font-weight: 900; letter-spacing: .15em; color: var(--accent); }
-.copy { word-break: break-all; }
 
 /* ---------- 演出 ---------- */
 .toast {
@@ -291,8 +290,26 @@ button.pink { background: var(--accent-2); color: #fff; }
 
 /* ---------- プロジェクター ---------- */
 .screen { display: grid; grid-template-columns: minmax(280px, 1fr) 2fr; gap: 20px; padding: 20px; min-height: 100vh; }
-.screen .current .ball { font-size: clamp(4rem, 14vw, 12rem); }
+.screen .current .ball { font-size: clamp(3.5rem, min(9vw, 13vh), 9rem); }
 .screen .count { font-size: clamp(1.2rem, 2.5vw, 2rem); font-weight: 800; }
 @media (max-width: 800px) {
   .screen { grid-template-columns: 1fr; padding: 12px; }
 }
+
+/* ---------- 共有・QR ---------- */
+.btn.secondary-btn { background: var(--panel-2); color: var(--text); border: 1px solid #ffffff22; font-size: .95rem; }
+.share-grid { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: center; }
+.qr { display: block; width: 180px; height: 180px; background: #fff; border-radius: 12px; padding: 6px; image-rendering: pixelated; }
+.copy { display: block; word-break: break-all; font-size: .95rem; color: var(--text); }
+@media (max-width: 480px) {
+  .share-grid { grid-template-columns: 1fr; justify-items: center; text-align: center; }
+}
+.screen-join { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center; }
+.screen-join .qr { width: clamp(140px, 14vw, 240px); height: auto; aspect-ratio: 1; }
+.screen.waiting .screen-join { grid-template-columns: 1fr; justify-items: center; text-align: center; }
+.screen.waiting .screen-join .qr { width: min(52vh, 30vw); }
+.screen.waiting .current-panel { display: none; }
+.join-hero { text-align: center; }
+.join-hero .event { font-size: clamp(1.4rem, 5vw, 2rem); font-weight: 900; }
+.screen-join .count { font-size: clamp(1rem, 1.5vw, 1.5rem); }
+.screen.waiting .screen-join .count { font-size: clamp(1.4rem, 2.5vw, 2.2rem); }

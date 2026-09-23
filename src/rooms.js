@@ -83,7 +83,12 @@ export class Room {
   constructor(data) {
     Object.assign(this, data);
     this.cardKeys = new Set();
-    for (const p of Object.values(this.players)) for (const c of p.cards) this.cardKeys.add(cardKey(c.numbers));
+    this.tokenIndex = new Map(); // token -> playerId（数千人でも O(1) で認証）
+    this.hostViewCache = null;
+    for (const p of Object.values(this.players)) {
+      this.tokenIndex.set(p.token, p.id);
+      for (const c of p.cards) this.cardKeys.add(cardKey(c.numbers));
+    }
   }
 
   static create(settings) {
@@ -106,7 +111,7 @@ export class Room {
   }
 
   toJSON() {
-    const { cardKeys, ...rest } = this;
+    const { cardKeys, tokenIndex, hostViewCache, ...rest } = this;
     return rest;
   }
 
@@ -147,12 +152,15 @@ export class Room {
     for (let i = 0; i < this.settings.cardsPerPlayer; i++) player.cards.push(this.newCard());
     this.syncAutoMarks(player);
     this.players[player.id] = player;
+    this.tokenIndex.set(player.token, player.id);
     this.touch();
     return player;
   }
 
   findPlayerByToken(tok) {
-    return Object.values(this.players).find((p) => safeEqual(p.token, tok)) ?? null;
+    if (typeof tok !== 'string' || !tok) return null;
+    const player = this.players[this.tokenIndex.get(tok)];
+    return player && safeEqual(player.token, tok) ? player : null;
   }
 
   syncAutoMarks(player) {
@@ -393,7 +401,15 @@ export class Room {
     };
   }
 
-  hostView() {
+  /** 全参加者のリーチ集計は重いので、最大 maxAgeMs に1回だけ計算する */
+  hostView(maxAgeMs = 0, now = Date.now()) {
+    if (this.hostViewCache && now - this.hostViewCache.at < maxAgeMs) return this.hostViewCache.view;
+    const view = this.computeHostView();
+    this.hostViewCache = { at: now, view };
+    return view;
+  }
+
+  computeHostView() {
     const players = Object.values(this.players).map((p) => ({
       id: p.id,
       name: p.name,
@@ -440,7 +456,7 @@ export class RoomStore extends EventEmitter {
     this.saveTimer = setTimeout(() => {
       this.saveTimer = null;
       this.saveNow();
-    }, 500);
+    }, 1500); // 大人数時の書き込み頻度を抑える
   }
 
   saveNow() {

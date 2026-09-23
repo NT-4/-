@@ -210,5 +210,68 @@ export function celebrate(title = 'BINGO!', sub = '', ms = 3500) {
     overlay.remove();
     pieces.forEach((p) => p.remove());
   }, ms);
-  navigator.vibrate?.([100, 60, 200]);
+  vibrate([100, 60, 200]);
+}
+
+// ---------- 共有（参加URL・QR） ----------
+const isLocalHost = () => /^(localhost|127\.|\[?::1\]?$)/.test(location.hostname);
+
+/**
+ * 参加者に配る URL のベースを決める。
+ * PUBLIC_URL（本番）> 今開いている URL > localhost の場合は LAN の URL
+ */
+export async function shareBase() {
+  const cfg = await api('/api/config').catch(() => ({}));
+  if (cfg.publicUrl) return { base: cfg.publicUrl, options: [cfg.publicUrl], note: null };
+  if (!isLocalHost()) return { base: location.origin, options: [location.origin], note: null };
+  const lan = cfg.lanUrls ?? [];
+  if (lan.length) {
+    return {
+      base: lan[0],
+      options: lan,
+      note: 'localhost では他の端末から開けないため、同じ Wi-Fi 内で使える LAN のアドレスで共有しています。会場外からも参加させる場合は公開サーバーにデプロイしてください。',
+    };
+  }
+  return { base: location.origin, options: [location.origin], note: 'この URL は他の端末から開けません。公開サーバーにデプロイするか PUBLIC_URL を設定してください。' };
+}
+
+export const joinUrlOf = (base, room) => `${base}/r/${room}`;
+export const qrSrc = (text) => `/api/qr.svg?text=${encodeURIComponent(text)}`;
+
+export async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('コピーしました');
+  } catch {
+    prompt('コピーしてください', text);
+  }
+}
+
+export async function shareLink(title, url) {
+  const text = `「${title}」のビンゴに参加しよう！`;
+  if (navigator.share) {
+    try {
+      await navigator.share({ title, text, url });
+      return;
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+    }
+  }
+  copyText(`${text}\n${url}`);
+}
+
+export const lineShareUrl = (title, url) =>
+  `https://line.me/R/share?text=${encodeURIComponent(`「${title}」のビンゴに参加しよう！\n${url}`)}`;
+
+/** ?base= で渡された共有先を、サーバーが認めた候補の中にある場合だけ採用する */
+export async function resolveShareBase() {
+  const info = await shareBase();
+  const wanted = params.get('base');
+  if (wanted && (info.options.includes(wanted) || wanted === location.origin)) info.base = wanted;
+  return info;
+}
+
+/** 画面に触れた後だけ振動させる（未操作時はブラウザが拒否して警告を出すため） */
+export function vibrate(pattern) {
+  if (navigator.userActivation?.hasBeenActive) navigator.vibrate?.(pattern);
 }

@@ -14,18 +14,24 @@
     </header>
 
     <div class="grid-2">
-      <section class="panel">
-        <h2>参加する</h2>
+      <section class="panel" id="join-panel">
+        <div id="join-hero" class="join-hero hidden">
+          <div class="muted small">ビンゴ大会に招待されています</div>
+          <div class="event" id="event-title"></div>
+        </div>
+        <h2 id="join-heading">参加する</h2>
         <form id="join">
-          <label for="code">ルームコード</label>
-          <input id="code" name="code" autocomplete="off" maxlength="5" placeholder="例: K7Q2M" style="text-transform:uppercase;letter-spacing:.2em;font-weight:800" required>
+          <div id="code-wrap">
+            <label for="code">ルームコード</label>
+            <input id="code" name="code" autocomplete="off" maxlength="5" placeholder="例: K7Q2M" style="text-transform:uppercase;letter-spacing:.2em;font-weight:800" required>
+          </div>
           <label for="name">ニックネーム</label>
           <input id="name" name="name" maxlength="20" placeholder="例: たいち" required>
           <p style="margin-top:16px"><button class="big" type="submit">参加する</button></p>
         </form>
       </section>
 
-      <section class="panel">
+      <section class="panel" id="create-panel">
         <h2>ゲームを作る（主催者）</h2>
         <form id="create">
           <label for="title">イベント名</label>
@@ -59,9 +65,22 @@
   <script type="module">
     import { api, storage, toast, el } from '/js/common.js';
 
-    const qsRoom = new URLSearchParams(location.search).get('room');
-    if (qsRoom) document.getElementById('code').value = qsRoom.toUpperCase();
+    const qsRoom = (new URLSearchParams(location.search).get('room') ?? '').toUpperCase();
     document.getElementById('name').value = storage.get('bingo.name') ?? '';
+
+    // QR / 共有リンクから来た人は「名前を入れて参加」だけの画面にする
+    if (qsRoom) {
+      document.getElementById('code').value = qsRoom;
+      if (storage.get(`bingo.player.${qsRoom}`)?.token) location.replace(`/play?room=${qsRoom}`);
+      api(`/api/rooms/${qsRoom}`).then((room) => {
+        document.getElementById('event-title').textContent = room.settings.title;
+        document.getElementById('join-hero').classList.remove('hidden');
+        document.getElementById('join-heading').textContent = 'ニックネームを入れて参加';
+        document.getElementById('code-wrap').classList.add('hidden');
+        document.getElementById('create-panel').classList.add('hidden');
+        document.getElementById('name').focus();
+      }).catch(() => toast('ルームが見つかりません。コードを確認してください'));
+    }
 
     document.getElementById('join').addEventListener('submit', async (e) => {
       e.preventDefault();
