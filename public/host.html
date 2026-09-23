@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ホスト管理画面</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <main class="wrap">
+    <header class="row" style="margin-bottom:12px">
+      <div>
+        <div class="small muted">ホスト管理画面</div>
+        <h1 id="title" style="font-size:1.4rem;margin:0">BINGO</h1>
+      </div>
+      <div class="spacer"></div>
+      <span id="status" class="badge">…</span>
+      <span id="clock" class="small muted"></span>
+      <span id="conn" class="small" title="接続状態">●</span>
+    </header>
+
+    <div class="grid-2">
+      <section class="panel">
+        <div class="small muted">ルームコード</div>
+        <div class="code-big" id="code"></div>
+        <div class="small muted" style="margin-top:6px">参加URL</div>
+        <div class="row">
+          <code class="copy small" id="join-url" style="flex:1"></code>
+          <button class="secondary small" id="copy">コピー</button>
+        </div>
+        <p class="small" style="margin-bottom:0">
+          <a id="screen-link" target="_blank" rel="noopener">📽 プロジェクター投影画面を開く</a>
+        </p>
+      </section>
+
+      <section class="panel">
+        <div class="stats">
+          <div class="stat"><b id="s-players">0</b><span class="small muted">参加者</span></div>
+          <div class="stat"><b id="s-reach">0</b><span class="small muted">リーチ中</span></div>
+          <div class="stat"><b id="s-winners">0</b><span class="small muted">ビンゴ</span></div>
+          <div class="stat"><b id="s-draws">0</b><span class="small muted">抽選数</span></div>
+          <div class="stat"><b id="s-rejected">0</b><span class="small muted">不正/誤申請</span></div>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel" style="margin-top:16px">
+      <div class="row" style="align-items:center">
+        <div class="current" id="current" style="min-width:160px"></div>
+        <div style="flex:1;min-width:240px;display:grid;gap:10px">
+          <button class="big" id="draw">🎲 抽選する <span class="small">(Space)</span></button>
+          <div class="row">
+            <button class="secondary" id="start">▶ 開始</button>
+            <button class="secondary" id="pause">⏸ 一時停止</button>
+            <button class="secondary" id="resume">▶ 再開</button>
+            <button class="secondary" id="finish">⏹ 終了</button>
+            <button class="danger" id="reset">↺ リセット（再ゲーム）</button>
+          </div>
+        </div>
+      </div>
+      <div class="board" id="board" style="margin-top:16px"></div>
+    </section>
+
+    <div class="grid-2" style="margin-top:16px">
+      <section class="panel">
+        <h2 style="font-size:1.1rem">当選者（リアルタイム）</h2>
+        <div id="ties" class="row small" style="margin-bottom:8px"></div>
+        <ol class="winners" id="winners"></ol>
+      </section>
+
+      <section class="panel">
+        <h2 style="font-size:1.1rem">設定</h2>
+        <form id="settings">
+          <div class="grid-2" style="gap:0 12px">
+            <div>
+              <label for="f-pattern">成立条件 <span class="small">(開始前のみ)</span></label>
+              <select id="f-pattern" name="pattern">
+                <option value="line">1列（縦・横・斜め）</option>
+                <option value="cross">十字</option>
+                <option value="corners">四隅</option>
+                <option value="full">全開け</option>
+              </select>
+            </div>
+            <div>
+              <label for="f-cards">カード枚数/人 <span class="small">(開始前のみ)</span></label>
+              <select id="f-cards" name="cardsPerPlayer"><option>1</option><option>2</option><option>3</option><option>4</option></select>
+            </div>
+            <div>
+              <label for="f-auto">自動抽選の間隔（秒・0で手動）</label>
+              <input id="f-auto" name="autoDrawSec" type="number" min="0" max="300">
+            </div>
+            <div>
+              <label for="f-limit">制限時間（分・0で無制限）</label>
+              <input id="f-limit" name="timeLimitMin" type="number" min="0" max="600">
+            </div>
+            <div>
+              <label for="f-tie">同時ビンゴの決め方</label>
+              <select id="f-tie" name="tiebreak">
+                <option value="lottery">くじ引き（ランダム）</option>
+                <option value="reach">残りリーチ数が多い順</option>
+                <option value="manual">手動（じゃんけん等）</option>
+              </select>
+            </div>
+            <div>
+              <label>&nbsp;</label>
+              <label class="check"><input type="checkbox" name="allowAutoMark" id="f-automark"> 参加者の自動マス開けを許可</label>
+            </div>
+          </div>
+          <label for="f-prizes">景品（1行1つ・上から1位, 2位…）</label>
+          <textarea id="f-prizes" name="prizes"></textarea>
+          <p style="margin-bottom:0"><button type="submit">設定を保存</button></p>
+        </form>
+      </section>
+    </div>
+
+    <section class="panel" style="margin-top:16px">
+      <h2 style="font-size:1.1rem">参加者 <span class="small muted" id="p-count"></span></h2>
+      <div id="players" class="row small"></div>
+    </section>
+  </main>
+
+  <script type="module">
+    import {
+      $, api, connect, el, roomId, storage, toast, rollTo, setBall, renderBoard,
+      renderWinners, statusBadge, clock,
+    } from '/js/common.js';
+
+    const token = storage.get(`bingo.host.${roomId}`);
+    if (!token) {
+      document.body.replaceChildren(el('main', { class: 'wrap' },
+        el('div', { class: 'panel' }, 'この端末にはこのルームのホスト権限がありません。', el('a', { href: '/' }, 'トップへ'))));
+      throw new Error('no host token');
+    }
+
+    let state = null;
+    let rolling = false;
+    let queued = null;
+    let shown = null;
+    let formDirty = false;
+
+    const act = async (path, body = {}) => {
+      try {
+        return await api(`/api/rooms/${roomId}/host/${path}`, body, token);
+      } catch (e) {
+        toast(e.message);
+        throw e;
+      }
+    };
+
+    const joinUrl = `${location.origin}/?room=${roomId}`;
+    $('#code').textContent = roomId;
+    $('#join-url').textContent = joinUrl;
+    $('#screen-link').href = `/screen?room=${roomId}`;
+    $('#copy').addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(joinUrl);
+        toast('参加URLをコピーしました');
+      } catch {
+        toast('コピーできませんでした。手動で選択してください');
+      }
+    });
+
+    const host = {
+      move: (winnerId, dir) => act('move', { winnerId, dir }).catch(() => {}),
+    };
+
+    function fillSettings(s, status) {
+      if (formDirty) return;
+      const f = $('#settings');
+      f.pattern.value = s.pattern;
+      f.cardsPerPlayer.value = String(s.cardsPerPlayer);
+      f.autoDrawSec.value = s.autoDrawSec;
+      f.timeLimitMin.value = s.timeLimitMin;
+      f.tiebreak.value = s.tiebreak;
+      f.allowAutoMark.checked = s.allowAutoMark;
+      f.prizes.value = s.prizes.join('\n');
+      f.pattern.disabled = f.cardsPerPlayer.disabled = status !== 'waiting';
+    }
+
+    function render() {
+      const { room, host: h } = state;
+      document.title = `${room.settings.title} | ホスト`;
+      $('#title').textContent = room.settings.title;
+      statusBadge($('#status'), room.status);
+      if (!rolling && shown !== room.draws.at(-1)) setBall($('#current'), (shown = room.draws.at(-1)));
+      renderBoard($('#board'), room.draws);
+
+      const s = room.status;
+      $('#start').classList.toggle('hidden', s !== 'waiting');
+      $('#pause').classList.toggle('hidden', s !== 'running');
+      $('#resume').classList.toggle('hidden', s !== 'paused');
+      $('#finish').classList.toggle('hidden', s === 'waiting' || s === 'finished');
+      $('#draw').disabled = s !== 'running' || rolling || room.draws.length >= 75;
+
+      $('#s-players').textContent = room.playerCount;
+      $('#s-reach').textContent = h.reachPlayers;
+      $('#s-winners').textContent = room.winners.length;
+      $('#s-draws').textContent = `${room.draws.length}/75`;
+      $('#s-rejected').textContent = h.rejectedClaims;
+
+      renderWinners($('#winners'), room.winners, { host });
+      const tieDraws = [...new Set(room.winners.filter((w) => w.tie).map((w) => w.achievedAtDraw))];
+      $('#ties').replaceChildren(
+        ...tieDraws.map((d) =>
+          el('div', { class: 'row' },
+            el('span', { class: 'tie' }, `⚡ ${d}球目で同時ビンゴ:`),
+            el('button', { class: 'secondary small', onclick: () => act('tiebreak', { achievedAtDraw: d, method: 'lottery' }) }, '🎲 くじ引き'),
+            el('button', { class: 'secondary small', onclick: () => act('tiebreak', { achievedAtDraw: d, method: 'reach' }) }, '🔥 リーチ数'),
+            el('span', { class: 'muted' }, '／↑↓で手動調整'),
+          )),
+      );
+
+      $('#p-count').textContent = `(${h.players.length}人)`;
+      $('#players').replaceChildren(
+        ...h.players.map((p) =>
+          el('span', { class: 'badge', title: p.reach ? `リーチ ${p.reach}` : '' },
+            p.won ? '🎉 ' : p.reach ? '🔥 ' : '', p.name)),
+      );
+      fillSettings(room.settings, room.status);
+    }
+
+    function onMessage(msg) {
+      const ev = msg.event;
+      if (ev?.kind === 'bingo') toast(`🎉 ${ev.name} さんがビンゴ申請（サーバー検証OK）`);
+      if (ev?.kind === 'timeup') toast('⏰ 制限時間に達したためゲームを終了しました');
+      if (ev?.kind === 'draw' && !rolling) {
+        rolling = true;
+        state = msg;
+        $('#draw').disabled = true;
+        rollTo($('#current'), ev.number, () => {
+          rolling = false;
+          shown = ev.number;
+          if (queued) (state = queued), (queued = null);
+          render();
+        });
+        return;
+      }
+      if (rolling) return void (queued = msg);
+      state = msg;
+      render();
+    }
+
+    $('#draw').addEventListener('click', () => act('draw').catch(() => {}));
+    $('#start').addEventListener('click', () => act('start').catch(() => {}));
+    $('#pause').addEventListener('click', () => act('pause').catch(() => {}));
+    $('#resume').addEventListener('click', () => act('resume').catch(() => {}));
+    $('#finish').addEventListener('click', () => confirm('ゲームを終了しますか？') && act('finish').catch(() => {}));
+    $('#reset').addEventListener('click', () =>
+      confirm('抽選履歴と当選者をリセットし、全員のカードを配り直します。よろしいですか？') && act('reset').catch(() => {}));
+
+    document.addEventListener('keydown', (e) => {
+      if ((e.code === 'Space' || e.code === 'Enter') && e.target === document.body) {
+        e.preventDefault();
+        if (!$('#draw').disabled) $('#draw').click();
+      }
+    });
+
+    const form = $('#settings');
+    form.addEventListener('input', () => (formDirty = true));
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const body = {
+        autoDrawSec: form.autoDrawSec.value,
+        timeLimitMin: form.timeLimitMin.value,
+        tiebreak: form.tiebreak.value,
+        allowAutoMark: form.allowAutoMark.checked,
+        prizes: form.prizes.value,
+      };
+      if (!form.pattern.disabled) Object.assign(body, { pattern: form.pattern.value, cardsPerPlayer: form.cardsPerPlayer.value });
+      await act('settings', body).then(() => toast('設定を保存しました')).catch(() => {});
+      formDirty = false;
+      if (state) fillSettings(state.room.settings, state.room.status);
+    });
+
+    // 無効なトークン・存在しないルームの検出
+    api(`/api/rooms/${roomId}`).catch((e) => toast(e.message, 6000));
+
+    connect(roomId, token, onMessage, (ok) => {
+      $('#conn').style.color = ok ? 'var(--ok)' : 'var(--danger)';
+    });
+    clock($('#clock'), () => state?.room);
+  </script>
+</body>
+</html>

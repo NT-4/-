@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ビンゴ投影画面</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <main class="screen">
+    <section style="display:grid;gap:16px;align-content:start">
+      <div>
+        <div class="logo" id="title" style="font-size:clamp(1.6rem,3.5vw,3rem)">BINGO</div>
+        <div class="row small muted"><span id="status" class="badge">…</span><span id="pattern"></span><span id="clock"></span></div>
+      </div>
+      <div class="panel current"><div id="current"></div><div class="count" id="count">0 / 75</div></div>
+      <div class="panel">
+        <div class="small muted">参加はこちら → <b id="join-url" style="color:var(--text)"></b></div>
+        <div class="code-big" id="code"></div>
+      </div>
+    </section>
+    <section style="display:grid;gap:16px;align-content:start">
+      <div class="panel"><div class="board" id="board"></div></div>
+      <div class="panel">
+        <h2>ビンゴ達成者</h2>
+        <ol class="winners" id="winners" style="grid-template-columns:repeat(auto-fill,minmax(240px,1fr))"></ol>
+      </div>
+    </section>
+  </main>
+
+  <script type="module">
+    import { $, connect, roomId, rollTo, setBall, renderBoard, renderWinners, statusBadge, clock, celebrate } from '/js/common.js';
+
+    let state = null;
+    let rolling = false;
+    let queued = null;
+    let shown = null;
+
+    $('#code').textContent = roomId;
+    $('#join-url').textContent = `${location.host}/?room=${roomId}`;
+
+    function render() {
+      const { room } = state;
+      document.title = `${room.settings.title} | 投影`;
+      $('#title').textContent = room.settings.title;
+      $('#pattern').textContent = `成立条件: ${room.settings.patternLabel}`;
+      statusBadge($('#status'), room.status);
+      $('#count').textContent = `${room.draws.length} / 75 球`;
+      if (!rolling && shown !== room.draws.at(-1)) setBall($('#current'), (shown = room.draws.at(-1)));
+      renderBoard($('#board'), room.draws);
+      renderWinners($('#winners'), room.winners);
+    }
+
+    connect(roomId, null, (msg) => {
+      const ev = msg.event;
+      if (ev?.kind === 'bingo') {
+        const w = msg.room.winners.find((x) => x.id === ev.winnerId);
+        celebrate('BINGO!', `${ev.name} さん${w ? `（${w.rank}位${w.prize ? `・${w.prize}` : ''}）` : ''}`, 5000);
+      }
+      if (ev?.kind === 'draw' && !rolling) {
+        rolling = true;
+        state = msg;
+        rollTo($('#current'), ev.number, () => {
+          rolling = false;
+          shown = ev.number;
+          if (queued) (state = queued), (queued = null);
+          render();
+        });
+        return;
+      }
+      if (rolling) return void (queued = msg);
+      state = msg;
+      render();
+    });
+    clock($('#clock'), () => state?.room);
+  </script>
+</body>
+</html>

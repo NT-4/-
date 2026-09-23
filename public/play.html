@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ビンゴに参加中</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <main class="wrap">
+    <header class="row" style="margin-bottom:12px">
+      <div>
+        <h1 id="title" style="font-size:1.3rem;margin:0">BINGO</h1>
+        <div class="small muted"><span id="me"></span> ・ <span id="pattern"></span></div>
+      </div>
+      <div class="spacer"></div>
+      <span id="status" class="badge">…</span>
+      <span id="clock" class="small muted"></span>
+      <span id="conn" class="small" title="接続状態">●</span>
+    </header>
+
+    <section class="panel" style="margin-bottom:16px">
+      <div class="row" style="align-items:flex-start">
+        <div class="current" id="current" style="min-width:120px"></div>
+        <div style="flex:1;min-width:200px">
+          <div class="small muted" id="count">0 / 75</div>
+          <div class="history" id="history" style="margin-top:6px"></div>
+        </div>
+      </div>
+      <div id="reach" class="reach-banner hidden" style="margin-top:8px">🔥 リーチ！</div>
+    </section>
+
+    <div class="row" style="margin-bottom:12px">
+      <label class="check" id="auto-wrap" style="margin:0">
+        <input type="checkbox" id="auto"> 自動でマスを開ける
+      </label>
+      <div class="spacer"></div>
+      <span class="small muted">出た番号のマスをタップして開けよう</span>
+    </div>
+
+    <div class="cards" id="cards"></div>
+
+    <section class="panel" style="margin-top:16px">
+      <h2 style="font-size:1.1rem">ビンゴ達成者</h2>
+      <ol class="winners" id="winners"></ol>
+    </section>
+
+    <p class="small muted" style="text-align:center;margin-top:20px">
+      <a href="#" id="leave">このルームから退出（この端末の参加情報を削除）</a>
+    </p>
+  </main>
+
+  <script type="module">
+    import {
+      $, api, connect, el, roomId, storage, toast, celebrate, rollTo, setBall,
+      renderHistory, renderWinners, statusBadge, clock, COLUMNS,
+    } from '/js/common.js';
+
+    const saved = storage.get(`bingo.player.${roomId}`);
+    if (!saved?.token) location.replace(`/?room=${roomId}`);
+    const token = saved?.token;
+
+    let state = null;      // 最新の受信データ
+    let rolling = false;   // 抽選演出中
+    let queued = null;
+    let prevReach = 0;
+    let shown = null;      // 表示中の番号
+    const claimed = new Set();
+
+    const act = (path, body) => api(`/api/rooms/${roomId}/${path}`, body, token);
+
+    // 起動時にトークンを検証（別端末で削除済み・ルームリセット等）
+    act('prefs', {}).catch((e) => {
+      if (e.status === 403 || e.status === 404) {
+        storage.remove(`bingo.player.${roomId}`);
+        toast(e.status === 404 ? 'ルームが見つかりません' : '参加情報が無効です。再参加してください');
+        setTimeout(() => location.replace(`/?room=${roomId}`), 1500);
+      }
+    });
+
+    function renderCards(me, room) {
+      const drawn = new Set(room.draws);
+      const canClaim = room.status === 'running' || room.status === 'paused' || room.status === 'finished';
+      $('#cards').replaceChildren(
+        ...me.cards.map((card, ci) => {
+          const reach = new Set(card.reachCells);
+          const line = new Set(card.completed.flat());
+          const cells = card.numbers.map((n, i) => {
+            const free = n === 0;
+            const cls = ['cell'];
+            if (free) cls.push('free');
+            if (card.marks[i] && !free) cls.push('marked');
+            if (!free && drawn.has(n)) cls.push('drawn');
+            if (reach.has(i)) cls.push('reach');
+            if (line.has(i)) cls.push('line');
+            return el('button', {
+              class: cls.join(' '),
+              'aria-pressed': card.marks[i] ? 'true' : 'false',
+              'aria-label': free ? 'FREE' : `${COLUMNS[i % 5]}${n}`,
+              disabled: free,
+              onclick: () => mark(card.id, i, n),
+            }, free ? 'FREE' : String(n));
+          });
+          const status = card.won
+            ? el('span', { class: 'status won-tag' }, '🎉 ビンゴ達成！')
+            : card.bingo
+              ? el('span', { class: 'status won-tag' }, 'ビンゴ！申請しよう')
+              : card.reachCells.length
+                ? el('span', { class: 'status reach-tag' }, `リーチ ×${card.reachCells.length}`)
+                : el('span', { class: 'status muted' }, me.cards.length > 1 ? `カード ${ci + 1}` : '');
+          return el('div', { class: `card${card.bingo ? ' bingo' : ''}` },
+            el('div', { class: 'card-head' }, ...COLUMNS.map((c) => el('div', {}, c))),
+            el('div', { class: 'card-grid' }, ...cells),
+            el('div', { class: 'card-foot' },
+              status,
+              el('button', {
+                class: 'pink',
+                disabled: !canClaim || card.won || !card.bingo,
+                onclick: () => claim(card.id),
+              }, card.won ? '申請済み' : 'ビンゴ申請'),
+            ),
+          );
+        }),
+      );
+    }
+
+    async function mark(cardId, index, n) {
+      if (!state) return;
+      if (!state.room.draws.includes(n)) {
+        const card = state.me.cards.find((c) => c.id === cardId);
+        if (!card.marks[index]) return toast(`${n} はまだ出ていません`);
+      }
+      try {
+        await act('mark', { cardId, index });
+      } catch (e) {
+        toast(e.message);
+      }
+    }
+
+    async function claim(cardId) {
+      if (claimed.has(cardId)) return;
+      claimed.add(cardId);
+      try {
+        const res = await act('claim', { cardId });
+        const w = state.room.winners.find((x) => x.id === res.winner.id) ?? res.winner;
+        celebrate('BINGO!', w.rank ? `${w.rank}位でビンゴ！` : 'ビンゴ成立！');
+      } catch (e) {
+        claimed.delete(cardId);
+        toast(e.message, 4000);
+      }
+    }
+
+    function render() {
+      const { room, me } = state;
+      document.title = `${room.settings.title} | ビンゴ`;
+      $('#title').textContent = room.settings.title;
+      $('#me').textContent = `${me.name} さん`;
+      $('#pattern').textContent = `成立条件: ${room.settings.patternLabel}`;
+      statusBadge($('#status'), room.status);
+      $('#count').textContent = `${room.draws.length} / 75 球`;
+      if (!rolling && shown !== room.draws.at(-1)) setBall($('#current'), (shown = room.draws.at(-1)));
+      renderHistory($('#history'), room.draws.slice(0, -1), 30);
+      $('#auto-wrap').classList.toggle('hidden', !room.settings.allowAutoMark);
+      $('#auto').checked = me.autoMark;
+      renderCards(me, room);
+      renderWinners($('#winners'), room.winners, { mine: new Set(me.cards.map((c) => c.id)) });
+
+      const reachTotal = me.cards.filter((c) => !c.won).reduce((s, c) => s + c.reachCells.length, 0);
+      $('#reach').classList.toggle('hidden', reachTotal === 0 || me.cards.every((c) => c.won));
+      if (reachTotal > prevReach && prevReach === 0) navigator.vibrate?.(80);
+      prevReach = reachTotal;
+    }
+
+    function onMessage(msg) {
+      if (msg.kicked) return;
+      const ev = msg.event;
+      if (ev?.kind === 'bingo' && ev.name !== msg.me?.name) toast(`🎉 ${ev.name} さんがビンゴ！`);
+      if (ev?.kind === 'reset') {
+        claimed.clear();
+        toast('新しいゲームが始まります。カードが配り直されました');
+      }
+      if (ev?.kind === 'timeup') toast('⏰ 制限時間になりました');
+      if (ev?.kind === 'draw' && !rolling) {
+        rolling = true;
+        state = msg;
+        rollTo($('#current'), ev.number, () => {
+          rolling = false;
+          shown = ev.number;
+          if (queued) (state = queued), (queued = null);
+          render();
+        });
+        return;
+      }
+      if (rolling) {
+        queued = msg;
+        return;
+      }
+      state = msg;
+      render();
+    }
+
+    $('#auto').addEventListener('change', (e) => act('prefs', { autoMark: e.target.checked }).catch((err) => toast(err.message)));
+    $('#leave').addEventListener('click', (e) => {
+      e.preventDefault();
+      if (!confirm('この端末の参加情報を削除します。よろしいですか？')) return;
+      storage.remove(`bingo.player.${roomId}`);
+      location.href = '/';
+    });
+
+    if (token) {
+      connect(roomId, token, onMessage, (ok) => {
+        $('#conn').style.color = ok ? 'var(--ok)' : 'var(--danger)';
+        $('#conn').title = ok ? '接続中' : '再接続中…';
+      });
+      clock($('#clock'), () => state?.room);
+    }
+  </script>
+</body>
+</html>

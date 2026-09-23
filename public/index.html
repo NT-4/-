@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>リアルタイムビンゴ</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <main class="wrap">
+    <header style="text-align:center;margin:20px 0 28px">
+      <div class="logo">BINGO</div>
+      <p class="muted">スマホ・タブレット・PC からそのまま参加できるリアルタイムビンゴ</p>
+    </header>
+
+    <div class="grid-2">
+      <section class="panel">
+        <h2>参加する</h2>
+        <form id="join">
+          <label for="code">ルームコード</label>
+          <input id="code" name="code" autocomplete="off" maxlength="5" placeholder="例: K7Q2M" style="text-transform:uppercase;letter-spacing:.2em;font-weight:800" required>
+          <label for="name">ニックネーム</label>
+          <input id="name" name="name" maxlength="20" placeholder="例: たいち" required>
+          <p style="margin-top:16px"><button class="big" type="submit">参加する</button></p>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>ゲームを作る（主催者）</h2>
+        <form id="create">
+          <label for="title">イベント名</label>
+          <input id="title" name="title" maxlength="40" placeholder="例: 2026 忘年会ビンゴ">
+          <div class="grid-2" style="gap:0 12px">
+            <div>
+              <label for="pattern">ビンゴ成立条件</label>
+              <select id="pattern" name="pattern">
+                <option value="line">1列（縦・横・斜め）</option>
+                <option value="cross">十字</option>
+                <option value="corners">四隅</option>
+                <option value="full">全開け</option>
+              </select>
+            </div>
+            <div>
+              <label for="cards">1人あたりのカード枚数</label>
+              <select id="cards" name="cardsPerPlayer">
+                <option>1</option><option>2</option><option>3</option><option>4</option>
+              </select>
+            </div>
+          </div>
+          <label for="prizes">景品（1行に1つ・上から1位, 2位…）</label>
+          <textarea id="prizes" name="prizes" placeholder="Nintendo Switch&#10;Amazonギフト券 1万円&#10;高級コーヒー豆"></textarea>
+          <p style="margin-top:16px"><button class="big pink" type="submit">ルームを作成</button></p>
+        </form>
+        <div id="my-rooms" class="small muted"></div>
+      </section>
+    </div>
+  </main>
+
+  <script type="module">
+    import { api, storage, toast, el } from '/js/common.js';
+
+    const qsRoom = new URLSearchParams(location.search).get('room');
+    if (qsRoom) document.getElementById('code').value = qsRoom.toUpperCase();
+    document.getElementById('name').value = storage.get('bingo.name') ?? '';
+
+    document.getElementById('join').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      const room = String(f.get('code')).trim().toUpperCase();
+      const name = String(f.get('name')).trim();
+      storage.set('bingo.name', name);
+      const saved = storage.get(`bingo.player.${room}`);
+      if (saved?.token) return (location.href = `/play?room=${room}`);
+      try {
+        const res = await api(`/api/rooms/${room}/join`, { name });
+        storage.set(`bingo.player.${room}`, res);
+        location.href = `/play?room=${room}`;
+      } catch (err) {
+        toast(err.message);
+      }
+    });
+
+    document.getElementById('create').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      try {
+        const res = await api('/api/rooms', {
+          title: f.get('title'),
+          pattern: f.get('pattern'),
+          cardsPerPlayer: f.get('cardsPerPlayer'),
+          prizes: f.get('prizes'),
+        });
+        storage.set(`bingo.host.${res.roomId}`, res.hostToken);
+        const list = storage.get('bingo.hostRooms') ?? [];
+        storage.set('bingo.hostRooms', [res.roomId, ...list.filter((r) => r !== res.roomId)].slice(0, 10));
+        location.href = `/host?room=${res.roomId}`;
+      } catch (err) {
+        toast(err.message);
+      }
+    });
+
+    const rooms = storage.get('bingo.hostRooms') ?? [];
+    if (rooms.length) {
+      document.getElementById('my-rooms').append(
+        el('p', {}, '最近作成したルーム: ', ...rooms.map((r) => [el('a', { href: `/host?room=${r}` }, r), ' '])),
+      );
+    }
+  </script>
+</body>
+</html>
