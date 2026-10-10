@@ -25,6 +25,7 @@ const PAGES = {
   '/play': 'play.html',
   '/screen': 'screen.html',
   '/poster': 'poster.html',
+  '/today': 'today.html',
 };
 
 /** 参加URL用の QR コード（SVG） */
