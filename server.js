@@ -26,6 +26,7 @@ const PAGES = {
   '/screen': 'screen.html',
   '/poster': 'poster.html',
   '/today': 'today.html',
+  '/neon': 'neon.html',
 };
 
 /** 参加URL用の QR コード（SVG） */
