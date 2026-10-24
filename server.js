@@ -4,9 +4,10 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { networkInterfaces } from 'node:os';
-import { randomInt } from 'node:crypto';
+import { randomInt, randomBytes } from 'node:crypto';
 import { RoomStore, GameError, safeEqual } from './src/rooms.js';
 import qrcode from './src/vendor/qrcode.mjs';
+import { SignalStore, parseBbox } from './src/signal.js';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(ROOT, 'public');
@@ -28,6 +29,7 @@ const PAGES = {
   '/today': 'today.html',
   '/neon': 'neon.html',
   '/dance': 'dance.html',
+  '/signal': 'signal.html',
 };
 
 /** 参加URL用の QR コード（SVG） */
@@ -73,8 +75,14 @@ function lanUrls(port) {
   return urls;
 }
 
+// 速度計測用のランダムデータ（圧縮されないよう乱数で埋める）
+const NOISE = randomBytes(64 * 1024);
+const MAX_DOWN_BYTES = 25 * 1024 * 1024;
+const MAX_UP_BYTES = 10 * 1024 * 1024;
+
 export function createApp({
   dataFile = null,
+  signalFile = null,
   tickMs = 1000,
   // Render は公開URLを RENDER_EXTERNAL_URL で自動設定する
   publicUrl = process.env.PUBLIC_URL ?? process.env.RENDER_EXTERNAL_URL ?? '',
@@ -84,6 +92,7 @@ export function createApp({
   joinRatePerMin = Number(process.env.JOIN_RATE_PER_MIN ?? 6000),
 } = {}) {
   const store = new RoomStore({ file: dataFile });
+  const signals = new SignalStore({ file: signalFile });
   /** roomId -> Set<{res, role, playerId}> */
   const clients = new Map();
   const limits = new Map();
@@ -162,12 +171,12 @@ export function createApp({
   tick.unref();
   heartbeat.unref();
 
-  async function readJson(req) {
+  async function readJson(req, limit = 16_384) {
     let size = 0;
     const chunks = [];
     for await (const chunk of req) {
       size += chunk.length;
-      if (size > 16_384) throw new GameError('リクエストが大きすぎます', 413);
+      if (size > limit) throw new GameError('リクエストが大きすぎます', 413);
       chunks.push(chunk);
     }
     if (!chunks.length) return {};
@@ -244,6 +253,8 @@ export function createApp({
       return res.end(qrSvg(text));
     }
 
+    if (parts[1] === 'signal') return signalApi(req, res, url, parts[2], ip);
+
     if (req.method === 'POST' && parts.length === 2 && parts[1] === 'rooms') {
       rateLimit(`create:${ip}`, 10, 60_000);
       const body = await readJson(req);
@@ -303,6 +314,50 @@ export function createApp({
     throw new GameError('Not Found', 404);
   }
 
+  /** 電波マップ: 計測用エンドポイントと共有データ */
+  async function signalApi(req, res, url, action, ip) {
+    const noStore = { 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' };
+    if (req.method === 'GET' && action === 'ping') {
+      res.writeHead(204, noStore);
+      return res.end();
+    }
+    if (req.method === 'GET' && action === 'down') {
+      rateLimit(`down:${ip}`, 120, 60_000);
+      const bytes = Math.min(MAX_DOWN_BYTES, Math.max(1024, Number.parseInt(url.searchParams.get('bytes'), 10) || 0));
+      res.writeHead(200, { ...noStore, 'Content-Type': 'application/octet-stream', 'Content-Length': bytes });
+      let left = bytes;
+      const pump = () => {
+        while (left > 0) {
+          const chunk = NOISE.subarray(0, Math.min(left, NOISE.length));
+          left -= chunk.length;
+          if (!res.write(chunk)) return res.once('drain', pump);
+        }
+        res.end();
+      };
+      res.on('close', () => (left = 0));
+      return pump();
+    }
+    if (req.method === 'POST' && action === 'up') {
+      rateLimit(`up:${ip}`, 60, 60_000);
+      let bytes = 0;
+      for await (const chunk of req) {
+        bytes += chunk.length;
+        if (bytes > MAX_UP_BYTES) throw new GameError('データが大きすぎます', 413);
+      }
+      return json(res, 200, { bytes });
+    }
+    if (req.method === 'POST' && action === 'points') {
+      rateLimit(`points:${ip}`, 60, 60_000);
+      const body = await readJson(req, 65_536);
+      return json(res, 200, signals.add(body.points));
+    }
+    if (req.method === 'GET' && action === 'points') {
+      const since = Number(url.searchParams.get('since')) || 0;
+      return json(res, 200, signals.query({ ...parseBbox(url.searchParams.get('bbox')), since }));
+    }
+    throw new GameError('Not Found', 404);
+  }
+
   async function serveStatic(res, pathname) {
     const rel = PAGES[pathname] ?? pathname.slice(1);
     const file = normalize(join(PUBLIC, rel));
@@ -347,18 +402,21 @@ export function createApp({
     clearInterval(tick);
     clearInterval(heartbeat);
     store.saveNow();
+    signals.saveNow();
   });
 
-  return { server, store };
+  return { server, store, signals };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT ?? 3000);
   const dataFile = process.env.DATA_FILE ?? join(ROOT, 'data', 'rooms.json');
-  const { server, store } = createApp({ dataFile });
+  const signalFile = process.env.SIGNAL_FILE ?? join(dirname(dataFile), 'signal.json');
+  const { server, store, signals } = createApp({ dataFile, signalFile });
   server.listen(port, () => console.log(`BINGO server: http://localhost:${port}`));
   const shutdown = () => {
     store.saveNow();
+    signals.saveNow();
     process.exit(0);
   };
   process.on('SIGINT', shutdown);
