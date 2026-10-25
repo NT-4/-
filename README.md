@@ -163,6 +163,21 @@ Render・Fly.io・Railway・Cloud Run など Docker が動く PaaS ならその�
 
 キャリア・格安SIM ごとの「つながりやすさ」を、現在地を中心に**メッシュ（25m〜500m 四方）で塗り分ける**実測マップです。降雨レーダーのように面で見られ、同じ場所で各社を比較できます。
 
+### スマホで使う（公開手順）
+
+スマホの GPS は **https の URL でしか動かない**ため、まず公開します（無料・約5分）。
+
+1. [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/nt-4/-) を押す（または Render にログイン →「New +」→「Blueprint」→ このリポジトリ）→「Apply」
+2. 発行された `https://〜.onrender.com/signal` をスマホで開き、位置情報を「許可」
+3. ホーム画面に追加してアプリ化
+   - iPhone（Safari）：共有ボタン →「ホーム画面に追加」
+   - Android（Chrome）：メニュー →「ホーム画面に追加」／「アプリをインストール」
+4. PC で開いた場合は「データ」タブに QR が出るので、スマホで読み取れば同じ画面が開きます
+
+アプリ化すると全画面で起動し、**圏外でも起動して「不通」を記録**、電波が戻ったら自動送信します。
+
+> Render の無料プランは再起動でディスクが消えるため、共有の計測データも消えます。継続して貯めるなら有料プラン（Starter 以上）＋ Disk を付け、`SIGNAL_FILE=/var/data/signal.json` を設定してください。
+
 | 機能 | 内容 |
 | --- | --- |
 | 計測 | 「ここで計測」でサーバーと実際に通信し、応答時間・下り・上り速度を測定 → GPS 位置と一緒に保存。軽量（約0.3MB）／標準（約3.5MB）／詳細（約18MB）の 3 モード |

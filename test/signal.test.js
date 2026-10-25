@@ -113,4 +113,7 @@ test('API: 投稿した計測を範囲検索で取得でき、範囲外・広す
   const wide = await fetch(`${base}/api/signal/points?bbox=30,130,40,140`);
   assert.equal(wide.status, 400);
   assert.equal((await fetch(`${base}/signal`)).status, 200);
+  const manifest = await fetch(`${base}/signal.webmanifest`);
+  assert.match(manifest.headers.get('content-type'), /manifest\+json/);
+  assert.equal((await manifest.json()).start_url, '/signal');
 });

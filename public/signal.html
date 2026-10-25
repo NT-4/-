@@ -7,7 +7,13 @@
 <meta name="theme-color" content="#111418" media="(prefers-color-scheme: dark)">
 <meta name="description" content="キャリア・格安SIMごとの電波（実測の速度・応答）を、現在地を中心にメッシュで可視化するマップ">
 <title>電波メッシュマップ</title>
-<link rel="icon" href="/icons/icon.svg">
+<link rel="icon" href="/icons/signal.svg">
+<link rel="manifest" href="/signal.webmanifest">
+<link rel="apple-touch-icon" href="/icons/signal-apple-touch.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="電波メッシュ">
 <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
 <style>
 :root{
@@ -286,6 +292,11 @@ button,select,input{font:inherit;color:inherit}
         <label class="btn" style="display:flex;align-items:center">読み込み<input type="file" id="importFile" accept=".json,application/json" hidden></label>
       </div>
       <div class="actions"><button class="btn" id="clearMine">自分の計測を端末から削除</button></div>
+      <div class="note" id="phoneBox">
+        <b>スマホで使う</b>
+        <ul id="phoneTips"></ul>
+        <img id="phoneQr" alt="このページのQRコード" width="160" height="160" hidden style="display:block;margin:8px auto 0;background:#fff;border-radius:8px">
+      </div>
       <div class="note">
         <b>データの扱い</b>
         <ul>

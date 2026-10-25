@@ -1,5 +1,5 @@
 // Service Worker: 画面ファイルだけをキャッシュし、ゲームの通信（/api）は常にネットワークへ
-const CACHE = 'bingo-shell-v1';
+const CACHE = 'bingo-shell-v2';
 const SHELL = [
   '/',
   '/play',
@@ -11,6 +11,15 @@ const SHELL = [
   '/icons/icon.svg',
   '/icons/icon-192.png',
   '/icons/apple-touch-icon.png',
+  // 電波マップ：圏外でも画面を開いて「不通」を記録できるように
+  '/signal',
+  '/signal.webmanifest',
+  '/js/signal.js',
+  '/js/signal-core.js',
+  '/vendor/leaflet/leaflet.js',
+  '/vendor/leaflet/leaflet.css',
+  '/icons/signal.svg',
+  '/icons/signal-192.png',
 ];
 
 self.addEventListener('install', (e) => {

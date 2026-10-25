@@ -1006,6 +1006,32 @@ document.querySelector('.tabs').addEventListener('click', (e) => {
 });
 $('#handle').addEventListener('click', () => $('#sheet').classList.toggle('collapsed'));
 
+// ---------- スマホアプリ化 ----------
+if ('serviceWorker' in navigator && isSecureContext) navigator.serviceWorker.register('/sw.js').catch(() => {});
+
+const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.userAgent.includes('Macintosh') && navigator.maxTouchPoints > 1);
+const touch = matchMedia('(pointer: coarse)').matches;
+const tips = [];
+if (!isSecureContext) tips.push('<b>この URL は https ではないため、スマホでは位置情報が使えません。</b>公開URL（https://〜）で開いてください');
+if (standalone) tips.push('ホーム画面のアプリとして起動中です');
+else if (ios) tips.push('Safari の共有ボタン →「ホーム画面に追加」でアプリとして使えます');
+else if (touch) tips.push('ブラウザのメニュー →「ホーム画面に追加」（または「アプリをインストール」）でアプリとして使えます');
+tips.push('一度開くと、圏外でもアプリが起動して「不通」を記録できます');
+if (!touch) {
+  tips.unshift('スマホのカメラで下の QR を読み取ると、この画面をスマホで開けます');
+  // 公開URLが設定されていればそちらを QR にする（localhost はスマホから開けないため）
+  fetch('/api/config')
+    .then((r) => r.json())
+    .catch(() => ({}))
+    .then(({ publicUrl }) => {
+      const qr = $('#phoneQr');
+      qr.src = `/api/qr.svg?text=${encodeURIComponent((publicUrl || location.origin) + '/signal')}`;
+      qr.hidden = false;
+    });
+}
+$('#phoneTips').innerHTML = tips.map((t) => `<li>${t}</li>`).join('');
+
 if (!navigator.connection) {
   setStatus('この端末は接続種別を判定できません。Wi-Fi をオフにしてから計測してください。');
 }
