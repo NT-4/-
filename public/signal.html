@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111418" media="(prefers-color-scheme: dark)">
+<meta name="description" content="キャリア・格安SIMごとの電波（実測の速度・応答）を、現在地を中心にメッシュで可視化するマップ">
+<title>電波メッシュマップ</title>
+<link rel="icon" href="/icons/signal.svg">
+<link rel="manifest" href="/signal.webmanifest">
+<link rel="apple-touch-icon" href="/icons/signal-apple-touch.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="電波メッシュ">
+<link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+<style>
+:root{
+  --bg:#f6f7f9; --surface:#ffffff; --surface-2:#eef0f3; --line:#d9dde3;
+  --text:#14181d; --muted:#5d6672; --accent:#1f6feb; --accent-ink:#ffffff;
+  --warn:#b54708; --warn-bg:#fff4e5; --ok:#13795b;
+  --shadow:0 6px 24px rgba(16,24,40,.14);
+  --diff-a:#2563eb; --diff-b:#ea580c; --diff-0:#cfd4dc;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#111418; --surface:#1a1f25; --surface-2:#232a32; --line:#313942;
+    --text:#e8ecf1; --muted:#9aa4b1; --accent:#5b9dff; --accent-ink:#0b1220;
+    --warn:#ffb26b; --warn-bg:#3a2612; --ok:#4fd1a5;
+    --shadow:0 6px 24px rgba(0,0,0,.45);
+    --diff-a:#60a5fa; --diff-b:#fb923c; --diff-0:#4b5563;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#111418; --surface:#1a1f25; --surface-2:#232a32; --line:#313942;
+  --text:#e8ecf1; --muted:#9aa4b1; --accent:#5b9dff; --accent-ink:#0b1220;
+  --warn:#ffb26b; --warn-bg:#3a2612; --ok:#4fd1a5;
+  --shadow:0 6px 24px rgba(0,0,0,.45);
+  --diff-a:#60a5fa; --diff-b:#fb923c; --diff-0:#4b5563;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,"Hiragino Sans","Yu Gothic UI",sans-serif;overflow:hidden;-webkit-tap-highlight-color:transparent}
+button,select,input{font:inherit;color:inherit}
+#map{position:fixed;inset:0;background:var(--surface-2)}
+
+/* top bar */
+.top{position:fixed;z-index:1000;top:calc(env(safe-area-inset-top,0px) + 10px);left:16px;right:16px;display:flex;gap:8px;align-items:center;pointer-events:none}
+.top>*{pointer-events:auto}
+.pill{background:var(--surface);border:1px solid var(--line);border-radius:999px;box-shadow:var(--shadow);height:40px;display:flex;align-items:center;padding:0 12px;gap:6px}
+.title{font-weight:700;white-space:nowrap}
+.title small{font-weight:500;color:var(--muted);margin-left:4px}
+.top select{border:0;background:transparent;height:100%;max-width:46vw;outline:none}
+.spacer{flex:1}
+.icon-btn{width:40px;justify-content:center;padding:0;cursor:pointer}
+.icon-btn svg{width:20px;height:20px}
+
+/* legend */
+.overlay{position:fixed;z-index:1000;right:16px;left:16px;top:calc(env(safe-area-inset-top,0px) + 58px);display:flex;flex-direction:column;align-items:flex-end;gap:8px;pointer-events:none}
+.overlay>*{pointer-events:auto}
+.legend{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:8px 10px;font-size:12px;max-width:190px;max-height:34vh;overflow-y:auto}
+.legend h4{margin:0 0 4px;font-size:12px;color:var(--muted);font-weight:600}
+.legend .row{display:flex;align-items:center;gap:6px;line-height:1.7}
+.legend i{width:14px;height:10px;border-radius:2px;display:inline-block;flex:none}
+.banner{align-self:center;background:var(--warn-bg);color:var(--warn);border:1px solid currentColor;border-radius:999px;padding:4px 12px;font-size:12px;font-weight:600;max-width:100%;text-align:center}
+
+/* sheet */
+.sheet{position:fixed;z-index:1002;left:0;right:0;bottom:0;background:var(--surface);border-top-left-radius:18px;border-top-right-radius:18px;box-shadow:var(--shadow);
+  padding:0 16px calc(env(safe-area-inset-bottom,0px) + 12px);max-height:56vh;display:flex;flex-direction:column;transition:transform .25s}
+.sheet.collapsed .panels{display:none}
+.handle{display:block;width:100%;height:22px;border:0;background:none;cursor:pointer;position:relative}
+.handle::before{content:"";position:absolute;left:50%;top:8px;width:40px;height:5px;margin-left:-20px;border-radius:3px;background:var(--line)}
+.tabs{display:flex;gap:4px;background:var(--surface-2);border-radius:10px;padding:3px}
+.tabs button{flex:1;border:0;background:none;padding:7px 0;border-radius:8px;cursor:pointer;color:var(--muted);font-weight:600}
+.tabs button[aria-selected="true"]{background:var(--surface);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.panels{overflow-y:auto;padding-top:12px;min-height:0}
+.panel[hidden]{display:none}
+.field{display:grid;grid-template-columns:96px 1fr;gap:8px;align-items:center;margin-bottom:10px}
+.field>label{color:var(--muted);font-size:13px}
+.field select,.field input{width:100%;height:36px;border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:0 8px;min-width:0}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{flex:1;border:0;background:var(--bg);padding:7px 2px;cursor:pointer;font-size:13px;border-left:1px solid var(--line)}
+.seg button:first-child{border-left:0}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);font-weight:600}
+.hint{color:var(--muted);font-size:12px;margin:-4px 0 10px}
+.actions{display:flex;gap:8px;margin:6px 0 10px}
+.btn{height:44px;border-radius:10px;border:1px solid var(--line);background:var(--bg);padding:0 14px;cursor:pointer;font-weight:600}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);flex:1}
+.btn.on{background:var(--ok);border-color:var(--ok);color:#fff}
+.btn:disabled{opacity:.5;cursor:default}
+.status{font-size:13px;color:var(--muted);min-height:20px}
+.status.warn{color:var(--warn)}
+.result{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:8px 0}
+.result div{background:var(--surface-2);border-radius:10px;padding:6px 8px}
+.result b{display:block;font-size:18px;font-variant-numeric:tabular-nums}
+.result span{font-size:11px;color:var(--muted)}
+.rank{list-style:none;margin:0;padding:0}
+.rank li{display:grid;grid-template-columns:1fr auto;gap:2px 8px;padding:8px 0;border-bottom:1px solid var(--line)}
+.rank .name{font-weight:600;display:flex;align-items:center;gap:6px;min-width:0}
+.rank .name i{width:10px;height:10px;border-radius:50%;flex:none}
+.rank .name em{font-style:normal;font-size:11px;color:var(--accent);border:1px solid currentColor;border-radius:4px;padding:0 4px}
+.rank .sc{font-weight:700;font-variant-numeric:tabular-nums;text-align:right}
+.rank .bar{grid-column:1/-1;height:6px;background:var(--surface-2);border-radius:3px;overflow:hidden}
+.rank .bar i{display:block;height:100%}
+.rank .meta{grid-column:1/-1;font-size:12px;color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.chips button{border:1px solid var(--line);background:var(--bg);border-radius:999px;padding:3px 10px;font-size:12px;cursor:pointer}
+.chips button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);font-weight:600}
+.note{font-size:12px;color:var(--muted);background:var(--surface-2);border-radius:10px;padding:10px 12px;margin:10px 0}
+.note b{color:var(--text)}
+.note ul{margin:4px 0 0;padding-left:18px}
+.empty{color:var(--muted);text-align:center;padding:16px 0}
+
+/* map popup */
+.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--surface);color:var(--text)}
+.leaflet-popup-content{margin:10px 12px;font-size:13px}
+.pop h5{margin:0 0 6px;font-size:13px}
+.pop table{border-collapse:collapse;width:100%}
+.pop td{padding:2px 4px;font-variant-numeric:tabular-nums}
+.pop td:first-child{padding-left:0}
+.pop td.r{text-align:right}
+.pop i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
+.me-dot{width:16px;height:16px;border-radius:50%;background:var(--accent);border:3px solid #fff;box-shadow:0 0 0 2px var(--accent),0 2px 6px rgba(0,0,0,.4)}
+.leaflet-control-attribution{font-size:10px}
+
+@media (min-width:900px){
+  .sheet{left:16px;right:auto;bottom:16px;top:calc(env(safe-area-inset-top,0px) + 62px);width:380px;max-height:none;border-radius:18px}
+  .handle{display:none}
+  .sheet.collapsed .panels{display:block}
+  .overlay{left:412px}
+}
+@media (max-width:420px){
+  .title small{display:none}
+  .result b{font-size:16px}
+}
+</style>
+</head>
+<body>
+<div id="map" aria-label="電波メッシュマップ"></div>
+
+<header class="top">
+  <div class="pill title">📶 電波メッシュ<small>実測マップ</small></div>
+  <div class="spacer"></div>
+  <div class="pill"><select id="metric" aria-label="表示する指標">
+    <option value="s">総合スコア</option>
+    <option value="d">下り速度</option>
+    <option value="u">上り速度</option>
+    <option value="r">応答時間</option>
+    <option value="p">電波強度(RSRP)</option>
+    <option value="n">計測数</option>
+  </select></div>
+  <button class="pill icon-btn" id="locate" aria-label="現在地に戻る" title="現在地に戻る">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+  </button>
+</header>
+
+<div class="overlay">
+  <div class="banner" id="banner" hidden></div>
+  <div class="legend" id="legend"></div>
+</div>
+
+<section class="sheet" id="sheet">
+  <button class="handle" id="handle" aria-label="パネルを開閉"></button>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="measure" aria-selected="true">計測</button>
+    <button role="tab" data-tab="compare" aria-selected="false">周辺比較</button>
+    <button role="tab" data-tab="view" aria-selected="false">表示</button>
+    <button role="tab" data-tab="data" aria-selected="false">データ</button>
+  </nav>
+  <div class="panels">
+    <!-- 計測 -->
+    <div class="panel" data-panel="measure">
+      <div class="field"><label for="myCarrier">自分の回線</label><select id="myCarrier"></select></div>
+      <div class="field" id="myNetField"><label for="myNet">利用中の網</label><select id="myNet"></select></div>
+      <div class="field"><label>計測モード</label>
+        <div class="seg" id="modeSeg">
+          <button data-v="light" aria-pressed="false">軽量</button>
+          <button data-v="std" aria-pressed="true">標準</button>
+          <button data-v="full" aria-pressed="false">詳細</button>
+        </div>
+      </div>
+      <p class="hint" id="modeHint"></p>
+      <div class="field"><label for="gen">表示中の電波</label>
+        <select id="gen"><option value="">未入力</option><option>5G</option><option>4G</option><option>3G</option><option value="none">圏外</option></select>
+      </div>
+      <div class="field"><label for="rsrp">RSRP (任意)</label><input id="rsrp" type="number" inputmode="numeric" placeholder="例 -95（dBm）" min="-150" max="-30"></div>
+      <div class="actions">
+        <button class="btn primary" id="measureBtn">ここで計測</button>
+        <button class="btn" id="autoBtn" aria-pressed="false">連続計測</button>
+      </div>
+      <div class="status" id="status" role="status">Wi-Fi をオフにして、モバイル回線で計測してください。</div>
+      <div class="result" id="result" hidden></div>
+      <div class="note">
+        <b>計測のしくみ</b>
+        <ul>
+          <li>サーバーと実際に通信し、応答時間・下り・上り速度を測ります（ブラウザは電波の dBm を直接読めないため）</li>
+          <li>GPS 位置と一緒に約 11m 単位で保存し、全員の計測をメッシュで集計します</li>
+          <li>連続計測は移動距離か 90 秒ごとに自動で測ります。歩きながら・電車でも使えます</li>
+          <li>Android は「設定 › デバイス情報 › SIM のステータス」で RSRP（dBm）を確認して入力すると精度が上がります</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 周辺比較 -->
+    <div class="panel" data-panel="compare" hidden>
+      <div class="field"><label>範囲</label>
+        <div class="seg" id="radiusSeg">
+          <button data-v="150" aria-pressed="false">150m</button>
+          <button data-v="300" aria-pressed="true">300m</button>
+          <button data-v="600" aria-pressed="false">600m</button>
+          <button data-v="1500" aria-pressed="false">1.5km</button>
+        </div>
+      </div>
+      <div class="field"><label>中心</label>
+        <div class="seg" id="originSeg">
+          <button data-v="me" aria-pressed="true">現在地</button>
+          <button data-v="center" aria-pressed="false">地図の中心</button>
+        </div>
+      </div>
+      <p class="hint" id="rankHint"></p>
+      <ol class="rank" id="rank"></ol>
+    </div>
+
+    <!-- 表示 -->
+    <div class="panel" data-panel="view" hidden>
+      <div class="field"><label>比べ方</label>
+        <div class="seg" id="viewSeg">
+          <button data-v="single" aria-pressed="true">1社</button>
+          <button data-v="best" aria-pressed="false">最強</button>
+          <button data-v="diff" aria-pressed="false">2社差</button>
+        </div>
+      </div>
+      <p class="hint" id="viewHint"></p>
+      <div class="field"><label>集計単位</label>
+        <div class="seg" id="groupSeg">
+          <button data-v="brand" aria-pressed="true">ブランド</button>
+          <button data-v="net" aria-pressed="false">回線（網）</button>
+        </div>
+      </div>
+      <div class="field" id="aField"><label for="selA">対象</label><select id="selA"></select></div>
+      <div class="field" id="bField" hidden><label for="selB">比較相手</label><select id="selB"></select></div>
+      <div id="bestChipsWrap" hidden>
+        <p class="hint">比較に含める（タップで切替）</p>
+        <div class="chips" id="bestChips"></div>
+      </div>
+      <div class="field"><label for="cellSize">メッシュ</label>
+        <select id="cellSize">
+          <option value="auto">自動（拡大率に合わせる）</option>
+          <option value="25">25m</option><option value="50">50m</option><option value="100">100m</option>
+          <option value="250">250m</option><option value="500">500m</option>
+        </select>
+      </div>
+      <div class="field"><label for="period">期間</label>
+        <select id="period"><option value="0">すべて</option><option value="30">30日以内</option><option value="7">7日以内</option><option value="1">24時間以内</option></select>
+      </div>
+      <div class="field"><label for="tod">時間帯</label>
+        <select id="tod">
+          <option value="all">全時間</option>
+          <option value="morning">朝 7–10時（通勤）</option>
+          <option value="noon">昼 11–14時（格安SIM混雑）</option>
+          <option value="evening">夕 17–20時（帰宅）</option>
+          <option value="night">夜 20–翌7時</option>
+          <option value="day">日中 10–17時</option>
+        </select>
+      </div>
+      <div class="field"><label for="minN">最低計測数</label>
+        <select id="minN"><option value="1">1件〜</option><option value="2">2件〜</option><option value="3">3件〜</option><option value="5">5件〜</option></select>
+      </div>
+    </div>
+
+    <!-- データ -->
+    <div class="panel" data-panel="data" hidden>
+      <div class="field"><label>共有</label>
+        <div class="seg" id="shareSeg">
+          <button data-v="on" aria-pressed="true">みんなと共有</button>
+          <button data-v="off" aria-pressed="false">端末内のみ</button>
+        </div>
+      </div>
+      <p class="hint" id="syncInfo"></p>
+      <div class="actions">
+        <button class="btn" id="syncBtn">今すぐ送信</button>
+        <button class="btn" id="demoBtn" aria-pressed="false">デモ表示</button>
+      </div>
+      <div class="actions">
+        <button class="btn" id="exportCsv">CSV 書き出し</button>
+        <button class="btn" id="exportJson">JSON 書き出し</button>
+        <label class="btn" style="display:flex;align-items:center">読み込み<input type="file" id="importFile" accept=".json,application/json" hidden></label>
+      </div>
+      <div class="actions"><button class="btn" id="clearMine">自分の計測を端末から削除</button></div>
+      <div class="note" id="phoneBox">
+        <b>スマホで使う</b>
+        <ul id="phoneTips"></ul>
+        <img id="phoneQr" alt="このページのQRコード" width="160" height="160" hidden style="display:block;margin:8px auto 0;background:#fff;border-radius:8px">
+      </div>
+      <div class="note">
+        <b>データの扱い</b>
+        <ul>
+          <li>保存するのは位置（約 11m 単位に丸め）・時刻・回線・計測値だけです。端末や個人を識別する情報は送りません</li>
+          <li>Wi-Fi 接続中の計測は保存しません（Android のみ自動判定。iPhone は手動で Wi-Fi をオフに）</li>
+          <li>圏外・通信不能だった地点も「不通」として記録し、電波が戻った時点でまとめて送信します</li>
+          <li>応答時間はサーバーまでの距離を含みます。全キャリア同じ条件なので相対比較には有効です</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script src="/vendor/leaflet/leaflet.js"></script>
+<script type="module" src="/js/signal.js"></script>
+</body>
+</html>

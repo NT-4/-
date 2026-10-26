@@ -106,6 +106,7 @@ Render・Fly.io・Railway・Cloud Run など Docker が動く PaaS ならその�
 | `PORT` | 3000 | 待ち受けポート |
 | `PUBLIC_URL` | なし（Render では自動） | 参加URL・QR に使う公開URL |
 | `DATA_FILE` | `data/rooms.json` | 状態の保存先 |
+| `SIGNAL_FILE` | `DATA_FILE` と同じフォルダの `signal.json` | 電波マップの計測データの保存先 |
 | `JOIN_RATE_PER_MIN` | 6000 | 1 IP あたりの参加受付上限（毎分） |
 | `TRUST_PROXY` | Render 上では自動 | `1` で `X-Forwarded-For` をクライアント IP として扱う（PaaS のプロキシ配下用） |
 
@@ -119,6 +120,7 @@ Render・Fly.io・Railway・Cloud Run など Docker が動く PaaS ならその�
 | `/screen?room=XXXXX` | プロジェクター | 大きな抽選演出、1〜75 の出目ボード、当選者と景品、参加用 QR（開始前は大きく表示） |
 | `/poster?room=XXXXX` | 受付・テーブル | 印刷用の参加ポスター（QR・URL・手順） |
 | `/r/XXXXX` | 参加者 | QR に入っている短縮URL（参加画面へ転送） |
+| `/signal` | 誰でも | 電波メッシュマップ（キャリア・格安SIM の実測比較） |
 
 ## 要件との対応
 
@@ -157,6 +159,59 @@ Render・Fly.io・Railway・Cloud Run など Docker が動く PaaS ならその�
 | 投影環境 | `/screen` をプロジェクターで全画面表示 |
 | 制限時間・テンポ | 自動抽選（N 秒ごと）と制限時間（到達で自動終了）。経過/残り時間を全画面に表示。ホストは Space キーで抽選 |
 
+## 電波メッシュマップ（`/signal`）
+
+キャリア・格安SIM ごとの「つながりやすさ」を、現在地を中心に**メッシュ（25m〜500m 四方）で塗り分ける**実測マップです。降雨レーダーのように面で見られ、同じ場所で各社を比較できます。
+
+### スマホで使う（公開手順）
+
+スマホの GPS は **https の URL でしか動かない**ため、まず公開します（無料・約5分）。
+
+1. [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/nt-4/-) を押す（または Render にログイン →「New +」→「Blueprint」→ このリポジトリ）→「Apply」
+2. 発行された `https://〜.onrender.com/signal` をスマホで開き、位置情報を「許可」
+3. ホーム画面に追加してアプリ化
+   - iPhone（Safari）：共有ボタン →「ホーム画面に追加」
+   - Android（Chrome）：メニュー →「ホーム画面に追加」／「アプリをインストール」
+4. PC で開いた場合は「データ」タブに QR が出るので、スマホで読み取れば同じ画面が開きます
+
+アプリ化すると全画面で起動し、**圏外でも起動して「不通」を記録**、電波が戻ったら自動送信します。
+
+> Render の無料プランは再起動でディスクが消えるため、共有の計測データも消えます。継続して貯めるなら有料プラン（Starter 以上）＋ Disk を付け、`SIGNAL_FILE=/var/data/signal.json` を設定してください。
+
+| 機能 | 内容 |
+| --- | --- |
+| 計測 | 「ここで計測」でサーバーと実際に通信し、応答時間・下り・上り速度を測定 → GPS 位置と一緒に保存。軽量（約0.3MB）／標準（約3.5MB）／詳細（約18MB）の 3 モード |
+| 連続計測 | 歩行・電車移動中に、移動距離（メッシュの約 6 割）か 90 秒ごとに自動計測。画面の自動消灯を防止 |
+| 圏外の記録 | 通信できなかった地点も「不通」として端末に保存し、電波が戻ったら自動送信 |
+| 1社表示 | 選んだキャリア（または全体）の総合スコア・下り・上り・応答時間・RSRP・計測数をメッシュで表示 |
+| 最強表示 | メッシュごとに最も強い回線の色で塗る（濃いほど 2 位との差が大きい） |
+| 2社差 | 2 社の総合スコアの差を青⇄橙で塗り分け。乗り換え検討や自宅・職場周辺の比較に |
+| 周辺比較 | 現在地（または地図の中心）から 150m〜1.5km 以内のランキング（スコア・下り・応答・不通率の中央値） |
+| 絞り込み | ブランド別／回線（網）別、期間、時間帯（昼 11–14時 = 格安SIMの混雑帯など）、最低計測数 |
+| データ | みんなと共有／端末内のみを選択、CSV・JSON 書き出し、JSON 読み込み、デモ表示（合成データ） |
+
+対応ブランド：docomo / ahamo / irumo / au / UQ mobile / povo / SoftBank / Y!mobile / LINEMO / 楽天モバイル と主要 MVNO（IIJmio・mineo・日本通信SIM・BIGLOBE・イオン・NURO・HIS・J:COM・LIBMO・LinksMate・QT ほか）。複数回線の MVNO は乗っている網（D/A/S/R）も選べます。
+
+### 計測の考え方と限界
+
+- **ブラウザ（特に iPhone）は電波強度 dBm を取得できません**。そのため「実際に通信してどれだけ速く、素早く応答するか」を測ります。体感に近く、キャリア間比較に向いた指標です
+- 総合スコア（0〜100）＝ 下り 55%・応答 30%・上り 15%（対数スケール）。Android の「SIM のステータス」で RSRP を入力すると 30% 分を電波強度で補正
+- 応答時間はサーバーまでの距離を含みます（全キャリア同条件なので相対比較は有効）。サーバーは利用者に近いリージョンに置くのがおすすめです
+- Wi-Fi 接続中は計測しません（Android Chrome は自動判定、iPhone は手動で Wi-Fi をオフに）
+- 位置は約 11m 単位に丸めて保存し、端末・個人を識別する情報は送りません。精度が ±150m より悪い計測は破棄します
+
+### API
+
+| メソッド | パス | 内容 |
+| --- | --- | --- |
+| GET | `/api/signal/ping` | 応答時間計測（204） |
+| GET | `/api/signal/down?bytes=N` | 下り計測用の乱数データ（最大 25MB） |
+| POST | `/api/signal/up` | 上り計測（最大 10MB、受信バイト数を返す） |
+| POST | `/api/signal/points` | 計測値の投稿（`{points:[...]}`、1 回 50 件まで。ID 重複は無視） |
+| GET | `/api/signal/points?bbox=南,西,北,東&since=ms` | 範囲内の計測値（最大 1 度四方・新しい順 20,000 件） |
+
+計測データは `data/signal.json`（`SIGNAL_FILE` で変更可。既定は `DATA_FILE` と同じフォルダ）に保存され、最大 30 万件を超えると古い順に削除します。地図は Leaflet（同梱、BSD-2-Clause）と OpenStreetMap / CARTO のタイルを使用しています。
+
 ## 構成
 
 ```
@@ -164,6 +219,9 @@ server.js          HTTP サーバー・REST API・SSE 配信
 src/game.js        純粋なゲームロジック（カード生成、判定、成立球数、順位）
 src/rooms.js       ルーム状態・権限・永続化・自動抽選タイマー
 src/vendor/        QR コード生成（qrcode-generator, MIT, Kazuhiko Arase）
+src/signal.js      電波マップの計測データ保持・範囲検索・永続化
+public/js/signal-core.js  キャリア一覧・スコア計算・メッシュ（サーバーと共有）
+public/vendor/leaflet/    地図ライブラリ Leaflet 1.9.4（BSD-2-Clause）
 scripts/loadtest.js 負荷試験
 public/            フロントエンド（素の HTML/CSS/ES Modules）
 test/              node:test によるテスト
